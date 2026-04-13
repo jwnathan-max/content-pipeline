@@ -645,6 +645,10 @@ with tab3:
             # ── 상태: 자막 추출 실패 → 수동 입력 ──
             if gen_state == 'transcript_error':
                 st.error("자막을 자동으로 추출할 수 없습니다. 영상 내용을 직접 입력해주세요.")
+                _saved_log = st.session_state.get('transcript_debug_log', '')
+                if _saved_log:
+                    with st.expander("자막 추출 디버그 로그", expanded=True):
+                        st.code(_saved_log, language="text")
                 manual_text = st.text_area("자막 직접 입력", height=200, key="manual_transcript")
                 col1, col2 = st.columns(2)
                 with col1:
@@ -697,9 +701,7 @@ with tab3:
 
                         _yt_logger.removeHandler(_log_handler)
                         _debug_log = _log_stream.getvalue()
-                        if _debug_log:
-                            with st.expander("자막 추출 디버그 로그", expanded=True):
-                                st.code(_debug_log, language="text")
+                        st.session_state['transcript_debug_log'] = _debug_log
 
                         if 'error' in result:
                             s1.update(label="Step 1: 자막 추출 실패", state="error")
