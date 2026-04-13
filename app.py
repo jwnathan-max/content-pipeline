@@ -3,10 +3,12 @@ app.py — 법인 컨설팅 콘텐츠 파이프라인 메인 앱
 """
 import hashlib
 import json
-import sqlite3
+import os
 from datetime import datetime
 from pathlib import Path
 
+import psycopg2
+import psycopg2.extras
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -25,7 +27,6 @@ from modules.ghost_publisher import publish_post, upload_image, test_connection
 load_dotenv()
 
 # Streamlit Cloud secrets → os.environ 동기화 (로컬 .env와 동일하게 동작)
-import os
 try:
     for key, value in st.secrets.items():
         if isinstance(value, str):
@@ -33,8 +34,7 @@ try:
 except Exception:
     pass
 
-DB_PATH = Path(__file__).parent / "database" / "pipeline.db"
-SCHEMA_PATH = Path(__file__).parent / "database" / "schema.sql"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # 기본 키워드 프리셋
 DEFAULT_KEYWORDS = ["법인세 절세", "법인 세무", "법인 노무관리", "법인 재무관리", "중소기업 세금", "법인 대표 세금"]
@@ -43,17 +43,92 @@ DEFAULT_KEYWORDS = ["법인세 절세", "법인 세무", "법인 노무관리", 
 # DB 초기화
 # ──────────────────────────────────────────────
 
-def get_db() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+def get_db():
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
+
+
+def _fetchall(conn, query, params=None):
+    """Execute query and return list of dicts."""
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(query, params or ())
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
+    return rows
+
+
+def _fetchone(conn, query, params=None):
+    """Execute query and return one dict or None."""
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(query, params or ())
+    row = cur.fetchone()
+    cur.close()
+    return dict(row) if row else None
+
+
+def _execute(conn, query, params=None):
+    """Execute a write query."""
+    cur = conn.cursor()
+    cur.execute(query, params or ())
+    conn.commit()
+    cur.close()
 
 
 def init_db():
     conn = get_db()
-    conn.executescript(SCHEMA_PATH.read_text(encoding='utf-8'))
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS channels (
+            id           SERIAL PRIMARY KEY,
+            channel_id   TEXT NOT NULL UNIQUE,
+            channel_name TEXT,
+            added_at     TIMESTAMP DEFAULT NOW(),
+            is_active    INTEGER DEFAULT 1
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS processed_videos (
+            id           SERIAL PRIMARY KEY,
+            video_id     TEXT NOT NULL UNIQUE,
+            title        TEXT,
+            channel_name TEXT,
+            processed_at TIMESTAMP DEFAULT NOW(),
+            status       TEXT DEFAULT 'completed',
+            content_json TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS video_cache (
+            cache_key   TEXT NOT NULL PRIMARY KEY,
+            data_json   TEXT,
+            cached_at   TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS publications (
+            id           SERIAL PRIMARY KEY,
+            video_id     TEXT NOT NULL,
+            channel      TEXT NOT NULL,
+            published_at TIMESTAMP DEFAULT NOW(),
+            url          TEXT,
+            status       TEXT DEFAULT 'pending'
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_posts (
+            id            SERIAL PRIMARY KEY,
+            video_id      TEXT NOT NULL,
+            channel       TEXT NOT NULL DEFAULT 'ghost',
+            scheduled_at  TEXT NOT NULL,
+            created_at    TIMESTAMP DEFAULT NOW(),
+            status        TEXT DEFAULT 'pending',
+            ghost_post_id TEXT,
+            ghost_url     TEXT,
+            error_msg     TEXT
+        )
+    """)
     conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -63,61 +138,54 @@ def init_db():
 
 def db_get_channels() -> list:
     conn = get_db()
-    rows = conn.execute("SELECT * FROM channels ORDER BY added_at DESC").fetchall()
+    rows = _fetchall(conn, "SELECT * FROM channels ORDER BY added_at DESC")
     conn.close()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def db_add_channel(channel_id: str, channel_name: str):
     conn = get_db()
-    conn.execute(
-        "INSERT OR IGNORE INTO channels (channel_id, channel_name) VALUES (?, ?)",
+    _execute(conn,
+        "INSERT INTO channels (channel_id, channel_name) VALUES (%s, %s) ON CONFLICT (channel_id) DO NOTHING",
         (channel_id.strip(), channel_name.strip()),
     )
-    conn.commit()
     conn.close()
 
 
 def db_toggle_channel(channel_id: str, is_active: int):
     conn = get_db()
-    conn.execute("UPDATE channels SET is_active=? WHERE channel_id=?", (is_active, channel_id))
-    conn.commit()
+    _execute(conn, "UPDATE channels SET is_active=%s WHERE channel_id=%s", (is_active, channel_id))
     conn.close()
 
 
 def db_delete_channel(channel_id: str):
     conn = get_db()
-    conn.execute("DELETE FROM channels WHERE channel_id=?", (channel_id,))
-    conn.commit()
+    _execute(conn, "DELETE FROM channels WHERE channel_id=%s", (channel_id,))
     conn.close()
 
 
 def db_is_processed(video_id: str) -> bool:
     conn = get_db()
-    row = conn.execute(
-        "SELECT id FROM processed_videos WHERE video_id=?", (video_id,)
-    ).fetchone()
+    row = _fetchone(conn, "SELECT id FROM processed_videos WHERE video_id=%s", (video_id,))
     conn.close()
     return row is not None
 
 
 def db_save_content(video_id: str, title: str, channel_name: str, content: dict, status: str = "completed"):
     conn = get_db()
-    conn.execute(
-        """INSERT OR REPLACE INTO processed_videos
-           (video_id, title, channel_name, status, content_json)
-           VALUES (?, ?, ?, ?, ?)""",
+    _execute(conn,
+        """INSERT INTO processed_videos (video_id, title, channel_name, status, content_json)
+           VALUES (%s, %s, %s, %s, %s)
+           ON CONFLICT (video_id) DO UPDATE SET title=EXCLUDED.title, channel_name=EXCLUDED.channel_name,
+           status=EXCLUDED.status, content_json=EXCLUDED.content_json, processed_at=NOW()""",
         (video_id, title, channel_name, status, json.dumps(content, ensure_ascii=False)),
     )
-    conn.commit()
     conn.close()
 
 
 def db_get_content(video_id: str) -> dict | None:
     conn = get_db()
-    row = conn.execute(
-        "SELECT content_json FROM processed_videos WHERE video_id=?", (video_id,)
-    ).fetchone()
+    row = _fetchone(conn, "SELECT content_json FROM processed_videos WHERE video_id=%s", (video_id,))
     conn.close()
     if row and row["content_json"]:
         return json.loads(row["content_json"])
@@ -130,50 +198,45 @@ def db_get_content(video_id: str) -> dict | None:
 
 def db_add_scheduled(video_id: str, channel: str, scheduled_at: str):
     conn = get_db()
-    conn.execute(
-        "INSERT INTO scheduled_posts (video_id, channel, scheduled_at) VALUES (?, ?, ?)",
+    _execute(conn,
+        "INSERT INTO scheduled_posts (video_id, channel, scheduled_at) VALUES (%s, %s, %s)",
         (video_id, channel, scheduled_at),
     )
-    conn.commit()
     conn.close()
 
 
 def db_get_scheduled(status: str | None = None) -> list:
     conn = get_db()
     if status:
-        rows = conn.execute(
+        rows = _fetchall(conn,
             "SELECT sp.*, pv.title, pv.channel_name FROM scheduled_posts sp "
             "LEFT JOIN processed_videos pv ON sp.video_id = pv.video_id "
-            "WHERE sp.status=? ORDER BY sp.scheduled_at ASC", (status,)
-        ).fetchall()
+            "WHERE sp.status=%s ORDER BY sp.scheduled_at ASC", (status,))
     else:
-        rows = conn.execute(
+        rows = _fetchall(conn,
             "SELECT sp.*, pv.title, pv.channel_name FROM scheduled_posts sp "
             "LEFT JOIN processed_videos pv ON sp.video_id = pv.video_id "
-            "ORDER BY sp.scheduled_at DESC LIMIT 50"
-        ).fetchall()
+            "ORDER BY sp.scheduled_at DESC LIMIT 50")
     conn.close()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def db_update_scheduled(sched_id: int, status: str, ghost_post_id: str = None,
                         ghost_url: str = None, error_msg: str = None):
     conn = get_db()
-    conn.execute(
-        "UPDATE scheduled_posts SET status=?, ghost_post_id=?, ghost_url=?, error_msg=? WHERE id=?",
+    _execute(conn,
+        "UPDATE scheduled_posts SET status=%s, ghost_post_id=%s, ghost_url=%s, error_msg=%s WHERE id=%s",
         (status, ghost_post_id, ghost_url, error_msg, sched_id),
     )
-    conn.commit()
     conn.close()
 
 
 def db_add_publication(video_id: str, channel: str, url: str, status: str):
     conn = get_db()
-    conn.execute(
-        "INSERT INTO publications (video_id, channel, url, status) VALUES (?, ?, ?, ?)",
+    _execute(conn,
+        "INSERT INTO publications (video_id, channel, url, status) VALUES (%s, %s, %s, %s)",
         (video_id, channel, url, status),
     )
-    conn.commit()
     conn.close()
 
 
@@ -232,10 +295,10 @@ def _today() -> str:
 def db_get_cache(cache_key: str):
     """캐시 반환. 없으면 None."""
     conn = get_db()
-    row = conn.execute(
-        "SELECT data_json, cached_at FROM video_cache WHERE cache_key=?",
+    row = _fetchone(conn,
+        "SELECT data_json, cached_at FROM video_cache WHERE cache_key=%s",
         (cache_key,),
-    ).fetchone()
+    )
     conn.close()
     if not row:
         return None
@@ -244,18 +307,17 @@ def db_get_cache(cache_key: str):
 
 def db_set_cache(cache_key: str, data):
     conn = get_db()
-    conn.execute(
-        "INSERT OR REPLACE INTO video_cache (cache_key, data_json, cached_at) VALUES (?, ?, datetime('now'))",
+    _execute(conn,
+        "INSERT INTO video_cache (cache_key, data_json, cached_at) VALUES (%s, %s, NOW()) "
+        "ON CONFLICT (cache_key) DO UPDATE SET data_json=EXCLUDED.data_json, cached_at=NOW()",
         (cache_key, json.dumps(data, ensure_ascii=False)),
     )
-    conn.commit()
     conn.close()
 
 
 def db_clear_cache(cache_key: str):
     conn = get_db()
-    conn.execute("DELETE FROM video_cache WHERE cache_key=?", (cache_key,))
-    conn.commit()
+    _execute(conn, "DELETE FROM video_cache WHERE cache_key=%s", (cache_key,))
     conn.close()
 
 
@@ -992,9 +1054,9 @@ with tab4:
         st.success(f"✅ **{target.get('title', '')}** 선택 완료! **'콘텐츠 생성' 탭**을 클릭하면 에디터가 바로 열립니다.")
 
     conn = get_db()
-    rows = conn.execute(
+    rows = _fetchall(conn,
         "SELECT video_id, title, channel_name, processed_at, status FROM processed_videos ORDER BY processed_at DESC LIMIT 50"
-    ).fetchall()
+    )
     conn.close()
 
     if not rows:
