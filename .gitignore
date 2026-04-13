@@ -1,0 +1,4 @@
+﻿.env
+database/pipeline.db
+logs/
+__pycache__/
