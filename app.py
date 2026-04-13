@@ -667,7 +667,16 @@ with tab3:
 
             # ── 상태: 자막이 짧음 → 계속 여부 확인 ──
             elif gen_state == 'short_warning':
-                st.warning("자막이 매우 짧습니다 (2분 미만 영상일 수 있음). 계속 진행할까요?")
+                _src = st.session_state.get('transcript_source', '알 수 없음')
+                st.warning(f"자막이 매우 짧습니다 (2분 미만 영상일 수 있음). 계속 진행할까요?\n\n**추출 출처:** `{_src}`")
+                _saved_log = st.session_state.get('transcript_debug_log', '')
+                if _saved_log:
+                    with st.expander("자막 추출 디버그 로그"):
+                        st.code(_saved_log, language="text")
+                _preview = st.session_state.get('transcript_text', '')[:500]
+                if _preview:
+                    with st.expander("추출된 자막 미리보기"):
+                        st.text(_preview)
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.button("계속 진행"):
@@ -711,6 +720,7 @@ with tab3:
 
                         transcript_text = result['text']
                         lang_info = f"{result['language']} ({result['source']})"
+                        st.session_state['transcript_source'] = lang_info
                         st.write(f"자막 언어: {lang_info} | {len(transcript_text):,}자")
 
                         if is_transcript_too_short(transcript_text):
