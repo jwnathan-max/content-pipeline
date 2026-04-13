@@ -146,7 +146,7 @@ def db_get_channels() -> list:
 def db_add_channel(channel_id: str, channel_name: str):
     conn = get_db()
     _execute(conn,
-        "INSERT INTO channels (channel_id, channel_name) VALUES (%s, %s) ON CONFLICT (channel_id) DO NOTHING",
+        "INSERT INTO channels (channel_id, channel_name, added_at) VALUES (%s, %s, NOW()) ON CONFLICT (channel_id) DO NOTHING",
         (channel_id.strip(), channel_name.strip()),
     )
     conn.close()
@@ -417,7 +417,8 @@ with tab1:
                 st.write(f"**{ch['channel_name']}**")
                 st.caption(ch['channel_id'])
             with col2:
-                st.caption(f"추가일: {ch['added_at'][:10]}")
+                added = str(ch['added_at'] or '')[:10] or '알 수 없음'
+                st.caption(f"추가일: {added}")
             with col3:
                 label = "✅ 활성" if ch['is_active'] else "⏸ 비활성"
                 if st.button(label, key=f"toggle_{ch['channel_id']}"):
