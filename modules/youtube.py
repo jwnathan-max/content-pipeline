@@ -1,11 +1,14 @@
 """
 youtube.py — RSS 피드 파싱 + 자막 추출 + 에러 처리
 """
+import logging
 import re
 import time
 import feedparser
 from datetime import datetime, timezone, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+
+logger = logging.getLogger(__name__)
 
 _yt_api = YouTubeTranscriptApi()
 
@@ -144,18 +147,24 @@ def get_transcript(video_id: str) -> dict:
     반환: { 'text': str, 'language': str, 'source': 'manual'|'auto'|'translated'|'ytdlp_manual'|'ytdlp_auto' }
     에러 시: { 'error': str }
     """
+    logger.info("[자막] video_id=%s 자막 추출 시작", video_id)
+
     # 1차: youtube-transcript-api
     for attempt in range(MAX_RETRIES):
         try:
+            logger.info("[자막] youtube-transcript-api 시도 %d/%d", attempt + 1, MAX_RETRIES)
             transcript_list = _yt_api.list(video_id)
+            logger.info("[자막] list() 성공 — 사용 가능한 자막 목록 조회 완료")
 
             # 1. 한국어 수동 자막
             for lang in TRANSCRIPT_PRIORITY:
                 try:
                     t = transcript_list.find_manually_created_transcript([lang])
                     text = _join_transcript(t.fetch())
+                    logger.info("[자막] 한국어 수동 자막 성공 (lang=%s, len=%d)", lang, len(text))
                     return {'text': text, 'language': lang, 'source': 'manual'}
                 except NoTranscriptFound:
+                    logger.debug("[자막] 수동 자막 없음 (lang=%s)", lang)
                     continue
 
             # 2. 한국어 자동 자막
@@ -163,8 +172,10 @@ def get_transcript(video_id: str) -> dict:
                 try:
                     t = transcript_list.find_generated_transcript([lang])
                     text = _join_transcript(t.fetch())
+                    logger.info("[자막] 한국어 자동 자막 성공 (lang=%s, len=%d)", lang, len(text))
                     return {'text': text, 'language': lang, 'source': 'auto'}
                 except NoTranscriptFound:
+                    logger.debug("[자막] 자동 자막 없음 (lang=%s)", lang)
                     continue
 
             # 3. 영어 자막 (번역)
@@ -173,17 +184,22 @@ def get_transcript(video_id: str) -> dict:
                     t = transcript_list.find_transcript([lang])
                     translated = t.translate('ko')
                     text = _join_transcript(translated.fetch())
+                    logger.info("[자막] 영어→한국어 번역 자막 성공 (lang=%s, len=%d)", lang, len(text))
                     return {'text': text, 'language': 'ko(번역)', 'source': 'translated'}
-                except Exception:
+                except Exception as e:
+                    logger.warning("[자막] 번역 자막 실패 (lang=%s): %s: %s", lang, type(e).__name__, e)
                     continue
 
             # youtube-transcript-api로 자막 없음 → yt-dlp 시도
+            logger.warning("[자막] youtube-transcript-api: 모든 언어에서 자막 없음 → yt-dlp fallback")
             break
 
         except TranscriptsDisabled:
+            logger.error("[자막] TranscriptsDisabled 예외 — 자막 비활성화")
             return {'error': '이 영상은 자막이 비활성화되어 있습니다.'}
         except Exception as e:
             err_str = str(e)
+            logger.error("[자막] 예외 발생 (attempt %d): %s: %s", attempt + 1, type(e).__name__, err_str[:300])
             if 'private' in err_str.lower() or 'unavailable' in err_str.lower():
                 return {'error': '비공개 또는 삭제된 영상입니다.'}
             if attempt < MAX_RETRIES - 1:
@@ -192,6 +208,7 @@ def get_transcript(video_id: str) -> dict:
             break  # 재시도 소진 → yt-dlp 시도
 
     # 2차 fallback: yt-dlp
+    logger.info("[자막] yt-dlp fallback 시작")
     return _get_transcript_ytdlp(video_id)
 
 
@@ -201,20 +218,27 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
         import yt_dlp
         import urllib.request
     except ImportError:
+        logger.error("[자막/yt-dlp] yt_dlp 모듈 import 실패")
         return {'error': '자막을 찾을 수 없습니다. 수동으로 내용을 입력해주세요.'}
 
     ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
 
     try:
+        logger.info("[자막/yt-dlp] extract_info 시작")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(
                 f'https://www.youtube.com/watch?v={video_id}',
                 download=False,
             )
+        logger.info("[자막/yt-dlp] extract_info 성공")
     except Exception as e:
+        logger.error("[자막/yt-dlp] extract_info 실패: %s: %s", type(e).__name__, str(e)[:300])
         return {'error': f'자막을 찾을 수 없습니다. 수동으로 내용을 입력해주세요. (상세: {str(e)[:80]})'}
 
     langs = ['ko', 'ko-KR']
+    available_subs = list(info.get('subtitles', {}).keys())[:10]
+    available_auto = list(info.get('automatic_captions', {}).keys())[:10]
+    logger.info("[자막/yt-dlp] 수동자막 언어: %s / 자동자막 언어: %s", available_subs, available_auto)
 
     for src_key, src_label in [('subtitles', 'ytdlp_manual'), ('automatic_captions', 'ytdlp_auto')]:
         subs = info.get(src_key, {})
@@ -222,6 +246,7 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
             if lang not in subs:
                 continue
             formats = subs[lang]
+            logger.info("[자막/yt-dlp] %s/%s 포맷 %d개: %s", src_key, lang, len(formats), [f.get('ext') for f in formats[:5]])
             # json3 > vtt > srv1 순으로 선호
             chosen = None
             for preferred_ext in ('json3', 'vtt', 'srv1'):
@@ -236,6 +261,7 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
             if not chosen:
                 continue
 
+            logger.info("[자막/yt-dlp] 선택된 포맷: ext=%s", chosen.get('ext'))
             try:
                 req = urllib.request.Request(
                     chosen['url'],
@@ -244,16 +270,23 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     raw = resp.read().decode('utf-8')
 
+                logger.info("[자막/yt-dlp] 자막 다운로드 성공 (raw len=%d)", len(raw))
+
                 if chosen.get('ext') == 'json3':
                     text = _parse_json3(raw)
                 else:
                     text = _parse_vtt(raw)
 
                 if text.strip():
+                    logger.info("[자막/yt-dlp] 파싱 성공 (text len=%d, source=%s)", len(text), src_label)
                     return {'text': text, 'language': lang, 'source': src_label}
-            except Exception:
+                else:
+                    logger.warning("[자막/yt-dlp] 파싱 결과 빈 텍스트")
+            except Exception as e:
+                logger.error("[자막/yt-dlp] 자막 다운로드/파싱 실패: %s: %s", type(e).__name__, str(e)[:200])
                 continue
 
+    logger.error("[자막/yt-dlp] 모든 시도 실패 — 자막 없음")
     return {'error': '자막을 찾을 수 없습니다. 수동으로 내용을 입력해주세요.'}
 
 

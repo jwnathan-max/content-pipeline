@@ -684,7 +684,23 @@ with tab3:
 
                     # Step 1: 자막 추출
                     with st.status("Step 1: 자막 추출 중...", expanded=True) as s1:
+                        import logging, io
+                        _log_stream = io.StringIO()
+                        _log_handler = logging.StreamHandler(_log_stream)
+                        _log_handler.setLevel(logging.DEBUG)
+                        _log_handler.setFormatter(logging.Formatter('%(message)s'))
+                        _yt_logger = logging.getLogger('modules.youtube')
+                        _yt_logger.setLevel(logging.DEBUG)
+                        _yt_logger.addHandler(_log_handler)
+
                         result = get_transcript(video_id)
+
+                        _yt_logger.removeHandler(_log_handler)
+                        _debug_log = _log_stream.getvalue()
+                        if _debug_log:
+                            with st.expander("자막 추출 디버그 로그", expanded=True):
+                                st.code(_debug_log, language="text")
+
                         if 'error' in result:
                             s1.update(label="Step 1: 자막 추출 실패", state="error")
                             st.session_state['gen_state'] = 'transcript_error'
