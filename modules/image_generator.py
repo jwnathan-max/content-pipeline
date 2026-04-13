@@ -27,7 +27,9 @@ COLOR_WHITE_40  = (255, 255, 255, 102)  # 40% 흰색
 COLOR_OVERLAY   = (13, 27, 42, 200)  # 반투명 오버레이
 
 # ── 폰트 경로 ────────────────────────────────────
-FONTS_DIR = Path("C:/Windows/Fonts")
+_PROJECT_FONTS = Path(__file__).parent.parent / "fonts"
+_SYSTEM_FONTS  = Path("C:/Windows/Fonts")
+FONTS_DIR = _PROJECT_FONTS if _PROJECT_FONTS.exists() else _SYSTEM_FONTS
 FONT_BOLD    = FONTS_DIR / "malgunbd.ttf"     # 맑은 고딕 Bold
 FONT_REGULAR = FONTS_DIR / "malgun.ttf"       # 맑은 고딕 Regular
 FONT_LIGHT   = FONTS_DIR / "malgunsl.ttf"     # 맑은 고딕 SemiLight
@@ -208,7 +210,7 @@ def generate_card_image(
     # 8. 우측 하단 URL (블로그 사이즈만)
     if size == "blog":
         font_url = _get_font(FONT_LIGHT, 22)
-        url_text = "biz-insight.ghost.io"
+        url_text = "biz-insight.kr"
         url_bbox = draw.textbbox((0, 0), url_text, font=font_url)
         draw.text(
             (W - pad - (url_bbox[2] - url_bbox[0]), sub_y),

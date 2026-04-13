@@ -34,6 +34,7 @@ CONTENT_TOOL = {
             "blog": {
                 "type": "object",
                 "properties": {
+                    "slug":             {"type": "string", "description": "URL 슬러그. 핵심 단어만 영문 소문자와 하이픈으로 간결하게 조합. 예: corporate-tax-savings"},
                     "title":            {"type": "string", "description": "블로그 포스트 제목. 60자 이내, 핵심 키워드 앞쪽 배치."},
                     "meta_title":       {"type": "string", "description": "검색엔진에 표시되는 메타 타이틀. 60자(characters) 이내. title과 다르게 SEO에 최적화된 형태로 작성."},
                     "excerpt":          {"type": "string", "description": "Ghost 블로그 목록에 표시되는 요약문. 2~3문장, 독자의 클릭을 유도하는 문장으로 작성."},
@@ -53,7 +54,7 @@ CONTENT_TOOL = {
                     "content": {"type": "string"},
                     "tags":    {"type": "array", "items": {"type": "string"}}
                 },
-                "required": ["title", "meta_title", "excerpt", "meta_description", "focus_keyword", "schema_faq", "content", "tags"]
+                "required": ["slug", "title", "meta_title", "excerpt", "meta_description", "focus_keyword", "schema_faq", "content", "tags"]
             },
             "instagram": {
                 "type": "object",
@@ -138,7 +139,7 @@ def _build_tool(formats: list[str]) -> dict:
     return tool
 
 
-def generate_content(transcript: str, formats: list[str] | None = None) -> dict:
+def generate_content(transcript: str, formats: list[str] | None = None, published_posts: list[dict] | None = None) -> dict:
     """
     자막으로 선택된 포맷의 콘텐츠 생성
     formats: 생성할 포맷 목록 ['sms', 'blog', 'instagram'] (None이면 전체)
@@ -170,6 +171,18 @@ def generate_content(transcript: str, formats: list[str] | None = None) -> dict:
     format_names = {'sms': 'SMS/LMS 문자', 'blog': '블로그', 'instagram': '인스타그램'}
     selected_label = ', '.join(format_names[f] for f in formats)
     user_content = f"[생성할 콘텐츠: {selected_label}]\n\n" + user_content
+
+    # 기존 발행 글 목록 → 내부 링크 삽입용
+    if published_posts and 'blog' in formats:
+        links = "\n".join(
+            f"- [{p['title']}](https://biz-insight.kr/{p['slug']}/) (태그: {p.get('tag', '')})"
+            for p in published_posts if p.get('slug')
+        )
+        if links:
+            user_content += (
+                "\n\n[기존 발행 글 목록 — 내부 링크 삽입에 활용하세요]\n"
+                + links
+            )
 
     tool = _build_tool(formats)
 

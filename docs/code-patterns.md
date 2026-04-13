@@ -39,7 +39,7 @@ message_type = "SMS" if byte_count <= 90 else "LMS"
 ```
 이규원 | (주)비즈파트너즈 팀장 · 비즈 인사이트 발행인
 ```
-사이트: biz-insight.ghost.io
+사이트: biz-insight.kr
 
 ## 블로그 이미지 생성 현황
 - 블로그 탭에서 `generate_card_image(size="blog")` 호출 → 1200×630 PNG

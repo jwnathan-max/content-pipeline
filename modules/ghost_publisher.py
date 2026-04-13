@@ -122,6 +122,10 @@ def publish_post(
         "custom_excerpt": blog.get("excerpt", blog.get("meta_description", "")),
     }
 
+    # 슬러그 설정
+    if blog.get("slug"):
+        post["slug"] = blog["slug"]
+
     # 태그 설정
     tags = blog.get("tags", [])
     if tags:

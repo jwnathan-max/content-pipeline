@@ -115,6 +115,15 @@ def init_db():
         )
     """)
     cur.execute("""
+        CREATE TABLE IF NOT EXISTS published_posts (
+            id           SERIAL PRIMARY KEY,
+            slug         TEXT NOT NULL,
+            title        TEXT NOT NULL,
+            tag          TEXT,
+            published_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS scheduled_posts (
             id            SERIAL PRIMARY KEY,
             video_id      TEXT NOT NULL,
@@ -240,6 +249,26 @@ def db_add_publication(video_id: str, channel: str, url: str, status: str):
     conn.close()
 
 
+def db_save_published_post(slug: str, title: str, tag: str = None):
+    """발행된 블로그 글의 slug/title을 저장 (내부 링크용)"""
+    conn = get_db()
+    _execute(conn,
+        "INSERT INTO published_posts (slug, title, tag) VALUES (%s, %s, %s)",
+        (slug, title, tag),
+    )
+    conn.close()
+
+
+def db_get_published_posts() -> list[dict]:
+    """저장된 발행 글 목록 반환 (내부 링크 삽입용)"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT slug, title, tag FROM published_posts ORDER BY published_at DESC")
+    rows = cur.fetchall()
+    conn.close()
+    return [{"slug": r[0], "title": r[1], "tag": r[2]} for r in rows]
+
+
 def process_pending_schedules():
     """예약 시간이 지난 pending 포스트를 자동 발행"""
     now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
@@ -280,6 +309,11 @@ def process_pending_schedules():
                     ghost_url=result.get('url', ''),
                 )
                 db_add_publication(sched['video_id'], 'ghost', result.get('url', ''), 'published')
+                db_save_published_post(
+                    blog.get('slug', ''),
+                    blog.get('title', ''),
+                    blog.get('tags', [''])[0] if blog.get('tags') else '',
+                )
                 published_count += 1
     return published_count
 
@@ -737,7 +771,8 @@ with tab3:
                 with st.status("Step 2: AI 콘텐츠 생성 중...", expanded=True) as s2:
                     transcript_for_gen = st.session_state.get('transcript_text', '')
                     selected_formats = st.session_state.get('selected_formats', ['sms', 'blog'])
-                    content = generate_content(transcript_for_gen, formats=selected_formats)
+                    existing_posts = db_get_published_posts()
+                    content = generate_content(transcript_for_gen, formats=selected_formats, published_posts=existing_posts)
                     if 'error' in content:
                         s2.update(label="Step 2: AI 생성 실패", state="error")
                         st.error(content['error'])
@@ -793,6 +828,7 @@ with tab3:
                 if 'blog' in tab_map:
                     with tab_map['blog']:
                         blog = content.get('blog', {})
+                        blog_slug = st.text_input("슬러그 (URL)", value=blog.get('slug', ''), key=f"blog_slug_{video_id}")
                         blog_title = st.text_input("블로그 제목", value=blog.get('title', ''), key=f"blog_title_{video_id}")
                         blog_meta_title = st.text_input(
                             f"메타 타이틀 (SEO, 60자 이내) — 현재 {len(blog.get('meta_title', blog.get('title', '')))}자",
@@ -851,6 +887,7 @@ with tab3:
                                 st.code(jsonld_code, language="html")
                                 st.caption("👆 위 코드를 복사하여 Ghost 포스트 설정 → Code Injection (Header)에 붙여넣으세요.")
                         if st.button("💾 블로그 내용 저장", key=f"save_blog_{video_id}"):
+                            content['blog']['slug'] = blog_slug
                             content['blog']['title'] = blog_title
                             content['blog']['meta_title'] = blog_meta_title
                             content['blog']['excerpt'] = blog_excerpt
@@ -1024,6 +1061,7 @@ with tab3:
                         st.caption("Ghost 블로그에 즉시 발행합니다.")
                         if st.button("📰 지금 발행", key=f"publish_now_{video_id}", type="primary"):
                             blog_data = {
+                                'slug': st.session_state.get(f"blog_slug_{video_id}", content['blog'].get('slug', '')),
                                 'title': st.session_state.get(f"blog_title_{video_id}", content['blog'].get('title', '')),
                                 'meta_title': st.session_state.get(f"blog_meta_title_{video_id}", content['blog'].get('meta_title', content['blog'].get('title', ''))),
                                 'meta_description': st.session_state.get(f"blog_meta_{video_id}", content['blog'].get('meta_description', '')),
@@ -1050,6 +1088,11 @@ with tab3:
                             else:
                                 st.success(f"발행 완료! {result.get('url', '')}")
                                 db_add_publication(video_id, 'ghost', result.get('url', ''), 'published')
+                                db_save_published_post(
+                                    blog_data.get('slug', ''),
+                                    blog_data.get('title', ''),
+                                    blog_data.get('tags', [''])[0] if blog_data.get('tags') else '',
+                                )
 
                     with deploy_tab2:
                         st.caption("예약 시간에 자동으로 Ghost에 발행됩니다.")
