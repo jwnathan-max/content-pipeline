@@ -8,35 +8,41 @@ import tempfile
 import time
 import feedparser
 import requests
+from http.cookiejar import MozillaCookieJar
 from datetime import datetime, timezone, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 logger = logging.getLogger(__name__)
 
+_yt_api: YouTubeTranscriptApi | None = None
 
-def _get_cookie_path() -> str | None:
-    """YOUTUBE_COOKIES 환경변수를 임시 파일로 저장하고 경로 반환"""
+
+def _get_yt_api() -> YouTubeTranscriptApi:
+    """쿠키 인증된 API 인스턴스를 lazy 생성 (호출 시점에 환경변수 읽기)"""
+    global _yt_api
+    if _yt_api is not None:
+        return _yt_api
+
     cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
     if not cookie_text:
-        return None
+        logger.info("[자막] YOUTUBE_COOKIES 미설정 — 쿠키 없이 진행")
+        _yt_api = YouTubeTranscriptApi()
+        return _yt_api
+
+    # Netscape 쿠키 텍스트 → 임시 파일 → MozillaCookieJar → requests.Session
     tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
     tmp.write(cookie_text)
     tmp.close()
-    return tmp.name
 
+    jar = MozillaCookieJar(tmp.name)
+    jar.load(ignore_discard=True, ignore_expires=True)
+    os.unlink(tmp.name)
 
-def _build_yt_api() -> YouTubeTranscriptApi:
-    """쿠키가 설정되어 있으면 쿠키 인증된 API 인스턴스를 반환"""
-    path = _get_cookie_path()
-    if not path:
-        logger.info("[자막] YOUTUBE_COOKIES 미설정 — 쿠키 없이 진행")
-        return YouTubeTranscriptApi()
-
-    logger.info("[자막] YouTube 쿠키 파일 생성: %s", path)
-    return YouTubeTranscriptApi(cookie_path=path)
-
-
-_yt_api = _build_yt_api()
+    session = requests.Session()
+    session.cookies = jar
+    logger.info("[자막] YouTube 쿠키 로드 완료 (쿠키 %d개)", len(jar))
+    _yt_api = YouTubeTranscriptApi(http_client=session)
+    return _yt_api
 
 TRANSCRIPT_PRIORITY = ['ko', 'ko-KR']
 TRANSCRIPT_FALLBACK = ['en', 'en-US']
@@ -179,7 +185,7 @@ def get_transcript(video_id: str) -> dict:
     for attempt in range(MAX_RETRIES):
         try:
             logger.info("[자막] youtube-transcript-api 시도 %d/%d", attempt + 1, MAX_RETRIES)
-            transcript_list = _yt_api.list(video_id)
+            transcript_list = _get_yt_api().list(video_id)
             logger.info("[자막] list() 성공 — 사용 가능한 자막 목록 조회 완료")
 
             # 1. 한국어 수동 자막
@@ -235,7 +241,13 @@ def get_transcript(video_id: str) -> dict:
 
     # 2차 fallback: yt-dlp
     logger.info("[자막] yt-dlp fallback 시작")
-    return _get_transcript_ytdlp(video_id)
+    result = _get_transcript_ytdlp(video_id)
+    if 'error' not in result:
+        return result
+
+    # 3차 fallback: 외부 웹 서비스
+    logger.info("[자막] 외부 서비스 fallback 시작")
+    return _get_transcript_web(video_id)
 
 
 def _get_transcript_ytdlp(video_id: str) -> dict:
@@ -255,9 +267,12 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
     }
 
     # yt-dlp에도 쿠키 전달
-    path = _get_cookie_path()
-    if path:
-        ydl_opts['cookiefile'] = path
+    cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    if cookie_text:
+        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+        tmp.write(cookie_text)
+        tmp.close()
+        ydl_opts['cookiefile'] = tmp.name
         logger.info("[자막/yt-dlp] 쿠키 파일 적용")
 
     try:
@@ -324,6 +339,59 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
                 continue
 
     logger.error("[자막/yt-dlp] 모든 시도 실패 — 자막 없음")
+    return {'error': '자막을 찾을 수 없습니다. 수동으로 내용을 입력해주세요.'}
+
+
+def _get_transcript_web(video_id: str) -> dict:
+    """외부 웹 서비스를 통한 자막 추출 (3차 fallback)"""
+    import json as _json
+    import urllib.request
+
+    # 방법 1: youtubetranscript.com (무료, API 키 불필요)
+    try:
+        url = f"https://youtubetranscript.com/?server_vid2={video_id}"
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode('utf-8')
+
+        # XML 형식 응답 파싱: <text>...</text> 태그에서 텍스트 추출
+        texts = re.findall(r'<text[^>]*>(.*?)</text>', raw, re.DOTALL)
+        if texts:
+            import html
+            cleaned = ' '.join(html.unescape(t).strip() for t in texts if t.strip())
+            if len(cleaned) > 100:
+                logger.info("[자막/web] youtubetranscript.com 성공 (len=%d)", len(cleaned))
+                return {'text': cleaned, 'language': 'ko', 'source': 'web_service'}
+    except Exception as e:
+        logger.warning("[자막/web] youtubetranscript.com 실패: %s: %s", type(e).__name__, str(e)[:200])
+
+    # 방법 2: downsub.com API
+    try:
+        api_url = f"https://downsub.com/api?url=https://www.youtube.com/watch?v={video_id}"
+        req = urllib.request.Request(api_url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = _json.loads(resp.read().decode('utf-8'))
+
+        # 한국어 자막 URL 찾기
+        for sub in data.get('subtitles', []) + data.get('autoSubs', []):
+            lang = sub.get('language', '').lower()
+            if 'ko' in lang or 'korean' in lang:
+                sub_url = sub.get('url', '')
+                if sub_url:
+                    with urllib.request.urlopen(sub_url, timeout=15) as resp2:
+                        sub_text = resp2.read().decode('utf-8')
+                    cleaned = _parse_vtt(sub_text) if 'WEBVTT' in sub_text else sub_text
+                    if len(cleaned) > 100:
+                        logger.info("[자막/web] downsub.com 성공 (len=%d)", len(cleaned))
+                        return {'text': cleaned, 'language': 'ko', 'source': 'web_downsub'}
+    except Exception as e:
+        logger.warning("[자막/web] downsub.com 실패: %s: %s", type(e).__name__, str(e)[:200])
+
+    logger.error("[자막/web] 모든 외부 서비스 실패")
     return {'error': '자막을 찾을 수 없습니다. 수동으로 내용을 입력해주세요.'}
 
 
