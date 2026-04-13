@@ -202,6 +202,37 @@ def generate_content(transcript: str, formats: list[str] | None = None) -> dict:
         except Exception:
             data["sms"]["byte_count"] = len(body.encode("utf-8"))
 
+    # blog title / meta_description 길이 보정
+    if "blog" in data:
+        blog = data["blog"]
+        title = blog.get("title", "")
+        meta = blog.get("meta_description", "")
+        kw = blog.get("focus_keyword", "")
+
+        # title이 60자 미만이면 키워드·연도·부제를 추가해서 늘림
+        if len(title) < 60:
+            suffixes = [
+                f" — 2026년 기준 핵심 정리",
+                f" | {kw} 완전 가이드",
+                f" — 법인 대표라면 반드시 확인하세요",
+            ]
+            for s in suffixes:
+                if len(title + s) >= 60:
+                    title = title + s
+                    break
+            else:
+                title = title + suffixes[0]  # 최소 하나는 붙임
+            blog["title"] = title
+
+        # meta_description이 145자 미만이면 보충
+        if len(meta) < 145:
+            pad = f" {kw}에 대해 법인 대표가 꼭 알아야 할 핵심 내용을 실무 사례와 함께 정리했습니다. 비즈 인사이트에서 확인하세요."
+            if len(meta + pad) >= 145:
+                meta = meta + pad
+            else:
+                meta = meta + pad + f" 2026년 최신 세법 기준으로 작성된 실무 가이드입니다."
+            blog["meta_description"] = meta[:160]
+
     return data
 
 
