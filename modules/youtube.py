@@ -2,15 +2,42 @@
 youtube.py — RSS 피드 파싱 + 자막 추출 + 에러 처리
 """
 import logging
+import os
 import re
+import tempfile
 import time
 import feedparser
+import requests
+from http.cookiejar import MozillaCookieJar
 from datetime import datetime, timezone, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 logger = logging.getLogger(__name__)
 
-_yt_api = YouTubeTranscriptApi()
+
+def _build_yt_api() -> YouTubeTranscriptApi:
+    """쿠키가 설정되어 있으면 쿠키 인증된 API 인스턴스를 반환"""
+    cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    if not cookie_text:
+        logger.info("[자막] YOUTUBE_COOKIES 미설정 — 쿠키 없이 진행")
+        return YouTubeTranscriptApi()
+
+    # Streamlit secrets / 환경변수에 저장된 Netscape 쿠키를 임시 파일로 기록
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+    tmp.write(cookie_text)
+    tmp.close()
+
+    jar = MozillaCookieJar(tmp.name)
+    jar.load(ignore_discard=True, ignore_expires=True)
+    os.unlink(tmp.name)
+
+    session = requests.Session()
+    session.cookies = jar
+    logger.info("[자막] YouTube 쿠키 로드 완료 (쿠키 %d개)", len(jar))
+    return YouTubeTranscriptApi(http_client=session)
+
+
+_yt_api = _build_yt_api()
 
 TRANSCRIPT_PRIORITY = ['ko', 'ko-KR']
 TRANSCRIPT_FALLBACK = ['en', 'en-US']
@@ -222,6 +249,15 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
         return {'error': '자막을 찾을 수 없습니다. 수동으로 내용을 입력해주세요.'}
 
     ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+
+    # yt-dlp에도 쿠키 전달
+    cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    if cookie_text:
+        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+        tmp.write(cookie_text)
+        tmp.close()
+        ydl_opts['cookiefile'] = tmp.name
+        logger.info("[자막/yt-dlp] 쿠키 파일 적용")
 
     try:
         logger.info("[자막/yt-dlp] extract_info 시작")
