@@ -806,7 +806,7 @@ with tab3:
                             key=f"blog_excerpt_{video_id}",
                         )
                         blog_meta = st.text_input("메타 설명 (SEO)", value=blog.get('meta_description', ''), key=f"blog_meta_{video_id}")
-                        _tag_options = ["value-up", "finence"]
+                        _tag_options = ["value-up", "finance"]
                         _current_tag = blog.get('tags', ['value-up'])[0] if blog.get('tags') else 'value-up'
                         _tag_index = _tag_options.index(_current_tag) if _current_tag in _tag_options else 0
                         blog_tag = st.selectbox("태그", options=_tag_options, index=_tag_index, key=f"blog_tag_{video_id}")
@@ -898,14 +898,12 @@ with tab3:
                         st.markdown("**대표 이미지 생성**")
                         img_col1, img_col2 = st.columns([3, 1])
                         with img_col1:
-                            _tag_to_label = {"finance": "법인 세무·재무", "value-up": "기업가치 향상"}
-                            _raw_tag = blog.get('tags', ['value-up'])[0] if blog.get('tags') else "value-up"
-                            _default_cat = _tag_to_label.get(_raw_tag, "법인 컨설팅")
+                            _current_img_tag = st.session_state.get(f"blog_tag_{video_id}", _current_tag)
                             img_category = st.text_input(
                                 "카테고리 태그",
-                                value=_default_cat,
+                                value=_current_img_tag,
                                 key=f"img_category_{video_id}",
-                                help="이미지 우측 상단에 표시되는 태그",
+                                help="이미지 우측 상단에 표시되는 태그 (finance 또는 value-up)",
                             )
                         with img_col2:
                             st.write("")
