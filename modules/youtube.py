@@ -8,33 +8,32 @@ import tempfile
 import time
 import feedparser
 import requests
-from http.cookiejar import MozillaCookieJar
 from datetime import datetime, timezone, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 logger = logging.getLogger(__name__)
 
 
-def _build_yt_api() -> YouTubeTranscriptApi:
-    """쿠키가 설정되어 있으면 쿠키 인증된 API 인스턴스를 반환"""
+def _get_cookie_path() -> str | None:
+    """YOUTUBE_COOKIES 환경변수를 임시 파일로 저장하고 경로 반환"""
     cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
     if not cookie_text:
-        logger.info("[자막] YOUTUBE_COOKIES 미설정 — 쿠키 없이 진행")
-        return YouTubeTranscriptApi()
-
-    # Streamlit secrets / 환경변수에 저장된 Netscape 쿠키를 임시 파일로 기록
+        return None
     tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
     tmp.write(cookie_text)
     tmp.close()
+    return tmp.name
 
-    jar = MozillaCookieJar(tmp.name)
-    jar.load(ignore_discard=True, ignore_expires=True)
-    os.unlink(tmp.name)
 
-    session = requests.Session()
-    session.cookies = jar
-    logger.info("[자막] YouTube 쿠키 로드 완료 (쿠키 %d개)", len(jar))
-    return YouTubeTranscriptApi(http_client=session)
+def _build_yt_api() -> YouTubeTranscriptApi:
+    """쿠키가 설정되어 있으면 쿠키 인증된 API 인스턴스를 반환"""
+    path = _get_cookie_path()
+    if not path:
+        logger.info("[자막] YOUTUBE_COOKIES 미설정 — 쿠키 없이 진행")
+        return YouTubeTranscriptApi()
+
+    logger.info("[자막] YouTube 쿠키 파일 생성: %s", path)
+    return YouTubeTranscriptApi(cookie_path=path)
 
 
 _yt_api = _build_yt_api()
@@ -248,15 +247,17 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
         logger.error("[자막/yt-dlp] yt_dlp 모듈 import 실패")
         return {'error': '자막을 찾을 수 없습니다. 수동으로 내용을 입력해주세요.'}
 
-    ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+    ydl_opts = {
+        'quiet': True, 'no_warnings': True,
+        'skip_download': True, 'format': 'best',
+        'writesubtitles': True, 'writeautomaticsub': True,
+        'subtitleslangs': ['ko', 'ko-KR', 'en', 'en-US'],
+    }
 
     # yt-dlp에도 쿠키 전달
-    cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
-    if cookie_text:
-        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
-        tmp.write(cookie_text)
-        tmp.close()
-        ydl_opts['cookiefile'] = tmp.name
+    path = _get_cookie_path()
+    if path:
+        ydl_opts['cookiefile'] = path
         logger.info("[자막/yt-dlp] 쿠키 파일 적용")
 
     try:
