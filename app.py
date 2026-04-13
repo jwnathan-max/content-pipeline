@@ -898,9 +898,12 @@ with tab3:
                         st.markdown("**대표 이미지 생성**")
                         img_col1, img_col2 = st.columns([3, 1])
                         with img_col1:
+                            _tag_to_label = {"finance": "법인 세무·재무", "value-up": "기업가치 향상"}
+                            _raw_tag = blog.get('tags', ['value-up'])[0] if blog.get('tags') else "value-up"
+                            _default_cat = _tag_to_label.get(_raw_tag, "법인 컨설팅")
                             img_category = st.text_input(
                                 "카테고리 태그",
-                                value=blog.get('tags', ['value-up'])[0] if blog.get('tags') else "value-up",
+                                value=_default_cat,
                                 key=f"img_category_{video_id}",
                                 help="이미지 우측 상단에 표시되는 태그",
                             )
