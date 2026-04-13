@@ -7,6 +7,8 @@ import feedparser
 from datetime import datetime, timezone, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
+_yt_api = YouTubeTranscriptApi()
+
 TRANSCRIPT_PRIORITY = ['ko', 'ko-KR']
 TRANSCRIPT_FALLBACK = ['en', 'en-US']
 MAX_RETRIES = 3
@@ -145,7 +147,7 @@ def get_transcript(video_id: str) -> dict:
     # 1차: youtube-transcript-api
     for attempt in range(MAX_RETRIES):
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript_list = _yt_api.list(video_id)
 
             # 1. 한국어 수동 자막
             for lang in TRANSCRIPT_PRIORITY:
@@ -334,8 +336,13 @@ def search_videos_by_keyword(keyword: str, max_results: int = 20) -> list[dict]:
     return videos
 
 
-def _join_transcript(entries: list) -> str:
-    return ' '.join(e['text'] for e in entries if e.get('text'))
+def _join_transcript(entries) -> str:
+    parts = []
+    for e in entries:
+        text = e.text if hasattr(e, 'text') else e.get('text', '')
+        if text:
+            parts.append(text)
+    return ' '.join(parts)
 
 
 def is_transcript_too_short(text: str, min_chars: int = 200) -> bool:
