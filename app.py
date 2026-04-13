@@ -1097,7 +1097,8 @@ with tab4:
             col1, col2 = st.columns([6, 1])
             with col1:
                 st.markdown(f"{status_icon} **{row['title'] or row['video_id']}**")
-                st.caption(f"{row['channel_name']} | {row['processed_at'][:16]} | https://www.youtube.com/watch?v={row['video_id']}")
+                _pa = str(row['processed_at'] or '')[:16] or '알 수 없음'
+                st.caption(f"{row['channel_name']} | {_pa} | https://www.youtube.com/watch?v={row['video_id']}")
             with col2:
                 if st.button("열기", key=f"open_{row['video_id']}"):
                     vid = row['video_id']
