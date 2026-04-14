@@ -282,6 +282,8 @@ def process_pending_schedules():
                 continue
 
             blog = content['blog']
+            import logging as _logging
+            _logging.info(f"[AutoPublish] video={sched['video_id']} schema_faq keys={list(blog.keys())} faq={blog.get('schema_faq', 'MISSING')}")
             # 이미지 업로드 시도
             feature_url = None
             img_key = f"blog_image_{sched['video_id']}"

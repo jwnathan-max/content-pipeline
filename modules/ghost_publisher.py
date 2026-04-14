@@ -6,11 +6,14 @@ ghost_publisher.py — Ghost Admin API 발행 모듈
 """
 import os
 import json
+import logging
 import datetime
 import requests
 import jwt
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -142,6 +145,7 @@ def publish_post(
 
     # FAQ schema (code injection)
     schema_faq = blog.get("schema_faq", [])
+    logger.info(f"[Ghost] schema_faq count={len(schema_faq)}, data={schema_faq[:2] if schema_faq else 'empty'}")
     if schema_faq:
         jsonld = json.dumps({
             "@context": "https://schema.org",
@@ -169,6 +173,27 @@ def publish_post(
         )
         resp.raise_for_status()
         result = resp.json()["posts"][0]
+
+        # Ghost 일부 버전에서 POST 생성 시 codeinjection_head가 무시될 수 있음
+        # → 생성 후 PUT으로 code injection 재설정
+        if schema_faq and not result.get("codeinjection_head"):
+            logger.info(f"[Ghost] codeinjection_head missing after POST, retrying with PUT for post {result['id']}")
+            try:
+                put_resp = requests.put(
+                    f"{api_url}/ghost/api/admin/posts/{result['id']}/",
+                    headers=_headers(api_key),
+                    json={"posts": [{
+                        "codeinjection_head": post["codeinjection_head"],
+                        "updated_at": result["updated_at"],
+                    }]},
+                    timeout=15,
+                )
+                put_resp.raise_for_status()
+                result = put_resp.json()["posts"][0]
+                logger.info(f"[Ghost] codeinjection_head set via PUT: {bool(result.get('codeinjection_head'))}")
+            except Exception as put_err:
+                logger.warning(f"[Ghost] PUT codeinjection_head failed: {put_err}")
+
         return {
             "id": result["id"],
             "url": result.get("url", ""),

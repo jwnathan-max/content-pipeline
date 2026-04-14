@@ -215,10 +215,11 @@ def generate_content(transcript: str, formats: list[str] | None = None, publishe
         except Exception:
             data["sms"]["byte_count"] = len(body.encode("utf-8"))
 
-    # blog title / meta_description 길이 보정
+    # blog title / meta_title / meta_description 길이 보정
     if "blog" in data:
         blog = data["blog"]
         title = blog.get("title", "")
+        meta_title = blog.get("meta_title", "")
         meta = blog.get("meta_description", "")
         kw = blog.get("focus_keyword", "")
 
@@ -234,17 +235,16 @@ def generate_content(transcript: str, formats: list[str] | None = None, publishe
                     title = title + s
                     break
             else:
-                title = title + suffixes[0]  # 최소 하나는 붙임
+                title = title + suffixes[0]
             blog["title"] = title
 
-        # meta_description이 145자 미만이면 보충
-        if len(meta) < 145:
-            pad = f" {kw}에 대해 법인 대표가 꼭 알아야 할 핵심 내용을 실무 사례와 함께 정리했습니다. 비즈 인사이트에서 확인하세요."
-            if len(meta + pad) >= 145:
-                meta = meta + pad
-            else:
-                meta = meta + pad + f" 2026년 최신 세법 기준으로 작성된 실무 가이드입니다."
-            blog["meta_description"] = meta[:160]
+        # meta_title이 60자 초과이면 잘라내기
+        if len(meta_title) > 60:
+            blog["meta_title"] = meta_title[:60]
+
+        # meta_description이 145자 초과이면 잘라내기
+        if len(meta) > 145:
+            blog["meta_description"] = meta[:145]
 
     return data
 
