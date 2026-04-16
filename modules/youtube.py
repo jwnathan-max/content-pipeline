@@ -264,7 +264,7 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
 
     ydl_opts = {
         'quiet': True, 'no_warnings': True,
-        'skip_download': True, 'format': 'best',
+        'skip_download': True,
         'writesubtitles': True, 'writeautomaticsub': True,
         'subtitleslangs': ['ko', 'ko-KR', 'en', 'en-US'],
     }
