@@ -283,11 +283,14 @@ def db_get_published_posts() -> list[dict]:
 
 def process_pending_schedules():
     """예약 시간이 지난 pending 포스트를 자동 발행"""
-    now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    now = datetime.now()
     pending = db_get_scheduled(status='pending')
     published_count = 0
     for sched in pending:
-        if sched['scheduled_at'] <= now:
+        sched_time = sched['scheduled_at']
+        if isinstance(sched_time, str):
+            sched_time = datetime.fromisoformat(sched_time)
+        if sched_time <= now:
             content = db_get_content(sched['video_id'])
             if not content or 'blog' not in content:
                 db_update_scheduled(sched['id'], 'failed', error_msg='콘텐츠 없음')
@@ -1307,13 +1310,13 @@ with tab5:
             col1, col2, col3 = st.columns([4, 2, 1])
             with col1:
                 st.markdown(f"{status_label} **{sched.get('title', sched['video_id'])}**")
-                st.caption(f"예약: {sched['scheduled_at'][:16]}")
+                st.caption(f"예약: {str(sched.get('scheduled_at') or '')[:16]}")
                 if sched.get('ghost_url'):
                     st.caption(f"URL: {sched['ghost_url']}")
                 if sched.get('error_msg'):
                     st.caption(f"오류: {sched['error_msg']}")
             with col2:
-                st.caption(f"등록일: {(sched.get('created_at') or '')[:16]}")
+                st.caption(f"등록일: {str(sched.get('created_at') or '')[:16]}")
             with col3:
                 if sched['status'] == 'pending':
                     if st.button("취소", key=f"cancel_sched_{sched['id']}"):
