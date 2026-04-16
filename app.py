@@ -493,10 +493,11 @@ with tab2:
             # DB 캐시 확인 (이전 수집 결과)
             all_videos = db_get_cache('channels')
 
-            # 수집 버튼 클릭 시 새로 수집
+            # 수집 버튼 클릭 시 새로 수집 (기존 리스트 유지 + 새 영상 병합)
             if collect_now:
-                db_clear_cache('channels')
-                all_videos = []
+                existing_videos = all_videos if all_videos else []
+                existing_ids = {v['video_id'] for v in existing_videos}
+                new_videos = []
                 progress_bar = st.progress(0, text="채널 불러오는 중...")
                 for i, ch in enumerate(active_channels):
                     progress_bar.progress(
@@ -504,10 +505,19 @@ with tab2:
                         text=f"({i+1}/{len(active_channels)}) {ch['channel_name']} 수집 중..."
                     )
                     videos = fetch_recent_videos(ch['channel_id'])
-                    all_videos.extend(videos)
+                    for v in videos:
+                        if v['video_id'] not in existing_ids:
+                            new_videos.append(v)
+                            existing_ids.add(v['video_id'])
                 progress_bar.progress(1.0, text="완료!")
                 progress_bar.empty()
+                all_videos = existing_videos + new_videos
+                db_clear_cache('channels')
                 db_set_cache('channels', all_videos)
+                if new_videos:
+                    st.success(f"새 영상 {len(new_videos)}개 추가됨!")
+                else:
+                    st.info("새 영상은 없지만 기존 리스트는 유지됩니다.")
 
             if all_videos is None:
                 st.info("📡 **수집하기** 버튼을 눌러 최신 영상을 가져오세요.")
