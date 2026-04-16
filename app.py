@@ -4,7 +4,9 @@ app.py — 법인 컨설팅 콘텐츠 파이프라인 메인 앱
 import hashlib
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+KST = timezone(timedelta(hours=9))
 from pathlib import Path
 
 import psycopg2
@@ -288,13 +290,15 @@ def db_get_published_posts() -> list[dict]:
 
 def process_pending_schedules():
     """예약 시간이 지난 pending 포스트를 자동 발행"""
-    now = datetime.now()
+    now = datetime.now(KST)
     pending = db_get_scheduled(status='pending')
     published_count = 0
     for sched in pending:
         sched_time = sched['scheduled_at']
         if isinstance(sched_time, str):
             sched_time = datetime.fromisoformat(sched_time)
+        if sched_time.tzinfo is None:
+            sched_time = sched_time.replace(tzinfo=KST)
         if sched_time <= now:
             content = db_get_content(sched['video_id'])
             if not content or 'blog' not in content:
@@ -343,7 +347,7 @@ def process_pending_schedules():
 # ──────────────────────────────────────────────
 
 def _today() -> str:
-    return datetime.now().strftime('%Y-%m-%d')
+    return datetime.now(KST).strftime('%Y-%m-%d')
 
 
 def db_get_cache(cache_key: str):
@@ -1200,8 +1204,8 @@ with tab3:
                             sched_time = st.time_input("발행 시간", value=datetime.strptime("09:00", "%H:%M").time(), key=f"sched_time_{video_id}")
 
                         if st.button("⏰ 예약 등록", key=f"schedule_{video_id}"):
-                            sched_dt = datetime.combine(sched_date, sched_time)
-                            if sched_dt <= datetime.now():
+                            sched_dt = datetime.combine(sched_date, sched_time, tzinfo=KST)
+                            if sched_dt <= datetime.now(KST):
                                 st.error("예약 시간은 현재 시간 이후여야 합니다.")
                             else:
                                 sched_iso = sched_dt.strftime('%Y-%m-%dT%H:%M:%S')
@@ -1212,18 +1216,26 @@ with tab3:
                                     img_bytes = st.session_state.get(f'blog_image_{video_id}')
                                     if img_bytes:
                                         img_fname = st.session_state.get(f'blog_image_fname_{video_id}', 'feature.png')
-                                        img_result = upload_image(img_bytes, img_fname)
-                                        if 'id' in img_result:
-                                            feature_id = img_result['id']
+                                        try:
+                                            img_result = upload_image(img_bytes, img_fname)
+                                            if 'id' in img_result:
+                                                feature_id = img_result['id']
+                                        except Exception:
+                                            pass
 
-                                    result = publish_post(
-                                        blog=blog_data,
-                                        feature_image_id=feature_id,
-                                        scheduled_at=sched_iso,
-                                    )
+                                    try:
+                                        result = publish_post(
+                                            blog=blog_data,
+                                            feature_image_id=feature_id,
+                                            scheduled_at=sched_iso,
+                                        )
+                                    except Exception as e:
+                                        result = {"error": f"연결 실패: {e}"}
 
                                 if 'error' in result:
                                     st.error(f"예약 실패: {result['error']}")
+                                    st.warning("WordPress 서버 연결에 실패했습니다. DB에 예약을 저장합니다. 나중에 '지금 실행' 버튼으로 재시도하세요.")
+                                    db_add_scheduled(video_id, 'wordpress', sched_iso)
                                 else:
                                     sched_id = db_add_scheduled(video_id, 'wordpress', sched_iso)
                                     if sched_id:
