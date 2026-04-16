@@ -972,7 +972,7 @@ with tab3:
                                 }, ensure_ascii=False, indent=2)
                                 jsonld_code = f'<script type="application/ld+json">\n{jsonld}\n</script>'
                                 st.code(jsonld_code, language="html")
-                                st.caption("👆 위 코드를 복사하여 Ghost 포스트 설정 → Code Injection (Header)에 붙여넣으세요.")
+                                st.caption("ℹ️ 발행 시 Rank Math FAQ Schema로 자동 등록됩니다.")
                         if st.button("💾 블로그 내용 저장", key=f"save_blog_{video_id}"):
                             content['blog']['slug'] = blog_slug
                             content['blog']['title'] = blog_title
@@ -1313,7 +1313,7 @@ with tab5:
                 if sched.get('error_msg'):
                     st.caption(f"오류: {sched['error_msg']}")
             with col2:
-                st.caption(f"등록일: {sched['created_at'][:16]}")
+                st.caption(f"등록일: {(sched.get('created_at') or '')[:16]}")
             with col3:
                 if sched['status'] == 'pending':
                     if st.button("취소", key=f"cancel_sched_{sched['id']}"):

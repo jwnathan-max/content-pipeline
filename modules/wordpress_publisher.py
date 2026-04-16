@@ -145,26 +145,8 @@ def publish_post(
     tag_names = blog.get("tags", [])
     tag_ids = _get_or_create_tags(config, tag_names) if tag_names else []
 
-    # FAQ Schema JSON-LD를 본문 끝에 삽입
     content = blog.get("content", "")
     schema_faq = blog.get("schema_faq", [])
-    if schema_faq:
-        jsonld = json.dumps({
-            "@context": "https://schema.org",
-            "@type": "FAQPage",
-            "mainEntity": [
-                {
-                    "@type": "Question",
-                    "name": faq.get("question", ""),
-                    "acceptedAnswer": {
-                        "@type": "Answer",
-                        "text": faq.get("answer", ""),
-                    },
-                }
-                for faq in schema_faq
-            ],
-        }, ensure_ascii=False)
-        content += f'\n\n<script type="application/ld+json">\n{jsonld}\n</script>'
 
     # 포스트 데이터
     post = {
@@ -180,6 +162,33 @@ def publish_post(
             "rank_math_focus_keyword": blog.get("focus_keyword", ""),
         },
     }
+
+    # FAQ Schema → Rank Math 메타로 전달 (자동 구조화 데이터 생성)
+    if schema_faq:
+        faq_schema = {
+            "metadata": {
+                "title": "FAQPage",
+                "type": "template",
+                "shortcode": "s-fbc3b98b-2694-4e94-9169-b2b116ce6204",
+                "isPrimary": False,
+            },
+            "@type": "FAQPage",
+            "mainEntity": [
+                {
+                    "@type": "Question",
+                    "name": faq.get("question", ""),
+                    "acceptedAnswer": {
+                        "@type": "Answer",
+                        "text": faq.get("answer", ""),
+                    },
+                }
+                for faq in schema_faq
+            ],
+        }
+        post["meta"]["rank_math_schema"] = json.dumps(
+            {"BlogPosting": post["meta"].get("rank_math_schema", {}), "FAQPage": faq_schema},
+            ensure_ascii=False,
+        )
 
     # 피처 이미지
     if feature_image_id:
