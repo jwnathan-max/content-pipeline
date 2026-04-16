@@ -9,6 +9,7 @@ from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -43,9 +44,20 @@ DEFAULT_KEYWORDS = ["법인세 절세", "법인 세무", "법인 노무관리", 
 # DB 초기화
 # ──────────────────────────────────────────────
 
+@st.cache_resource
+def _get_pool():
+    return psycopg2.pool.SimpleConnectionPool(1, 10, DATABASE_URL)
+
+
 def get_db():
-    conn = psycopg2.connect(DATABASE_URL)
+    pool = _get_pool()
+    conn = pool.getconn()
     return conn
+
+
+def put_db(conn):
+    pool = _get_pool()
+    pool.putconn(conn)
 
 
 def _fetchall(conn, query, params=None):
@@ -138,7 +150,7 @@ def init_db():
     """)
     conn.commit()
     cur.close()
-    conn.close()
+    put_db(conn)
 
 
 # ──────────────────────────────────────────────
@@ -148,7 +160,7 @@ def init_db():
 def db_get_channels() -> list:
     conn = get_db()
     rows = _fetchall(conn, "SELECT * FROM channels ORDER BY added_at DESC")
-    conn.close()
+    put_db(conn)
     return rows
 
 
@@ -158,25 +170,25 @@ def db_add_channel(channel_id: str, channel_name: str):
         "INSERT INTO channels (channel_id, channel_name, added_at) VALUES (%s, %s, NOW()) ON CONFLICT (channel_id) DO NOTHING",
         (channel_id.strip(), channel_name.strip()),
     )
-    conn.close()
+    put_db(conn)
 
 
 def db_toggle_channel(channel_id: str, is_active: int):
     conn = get_db()
     _execute(conn, "UPDATE channels SET is_active=%s WHERE channel_id=%s", (is_active, channel_id))
-    conn.close()
+    put_db(conn)
 
 
 def db_delete_channel(channel_id: str):
     conn = get_db()
     _execute(conn, "DELETE FROM channels WHERE channel_id=%s", (channel_id,))
-    conn.close()
+    put_db(conn)
 
 
 def db_is_processed(video_id: str) -> bool:
     conn = get_db()
     row = _fetchone(conn, "SELECT id FROM processed_videos WHERE video_id=%s", (video_id,))
-    conn.close()
+    put_db(conn)
     return row is not None
 
 
@@ -189,13 +201,13 @@ def db_save_content(video_id: str, title: str, channel_name: str, content: dict,
            status=EXCLUDED.status, content_json=EXCLUDED.content_json, processed_at=NOW()""",
         (video_id, title, channel_name, status, json.dumps(content, ensure_ascii=False)),
     )
-    conn.close()
+    put_db(conn)
 
 
 def db_get_content(video_id: str) -> dict | None:
     conn = get_db()
     row = _fetchone(conn, "SELECT content_json FROM processed_videos WHERE video_id=%s", (video_id,))
-    conn.close()
+    put_db(conn)
     if row and row["content_json"]:
         return json.loads(row["content_json"])
     return None
@@ -211,7 +223,7 @@ def db_add_scheduled(video_id: str, channel: str, scheduled_at: str):
         "INSERT INTO scheduled_posts (video_id, channel, scheduled_at) VALUES (%s, %s, %s)",
         (video_id, channel, scheduled_at),
     )
-    conn.close()
+    put_db(conn)
 
 
 def db_get_scheduled(status: str | None = None) -> list:
@@ -226,7 +238,7 @@ def db_get_scheduled(status: str | None = None) -> list:
             "SELECT sp.*, pv.title, pv.channel_name FROM scheduled_posts sp "
             "LEFT JOIN processed_videos pv ON sp.video_id = pv.video_id "
             "ORDER BY sp.scheduled_at DESC LIMIT 50")
-    conn.close()
+    put_db(conn)
     return rows
 
 
@@ -237,7 +249,7 @@ def db_update_scheduled(sched_id: int, status: str, ghost_post_id: str = None,
         "UPDATE scheduled_posts SET status=%s, ghost_post_id=%s, ghost_url=%s, error_msg=%s WHERE id=%s",
         (status, ghost_post_id, ghost_url, error_msg, sched_id),
     )
-    conn.close()
+    put_db(conn)
 
 
 def db_add_publication(video_id: str, channel: str, url: str, status: str):
@@ -246,7 +258,7 @@ def db_add_publication(video_id: str, channel: str, url: str, status: str):
         "INSERT INTO publications (video_id, channel, url, status) VALUES (%s, %s, %s, %s)",
         (video_id, channel, url, status),
     )
-    conn.close()
+    put_db(conn)
 
 
 def db_save_published_post(slug: str, title: str, tag: str = None):
@@ -256,7 +268,7 @@ def db_save_published_post(slug: str, title: str, tag: str = None):
         "INSERT INTO published_posts (slug, title, tag) VALUES (%s, %s, %s)",
         (slug, title, tag),
     )
-    conn.close()
+    put_db(conn)
 
 
 def db_get_published_posts() -> list[dict]:
@@ -265,7 +277,7 @@ def db_get_published_posts() -> list[dict]:
     cur = conn.cursor()
     cur.execute("SELECT slug, title, tag FROM published_posts ORDER BY published_at DESC")
     rows = cur.fetchall()
-    conn.close()
+    put_db(conn)
     return [{"slug": r[0], "title": r[1], "tag": r[2]} for r in rows]
 
 
@@ -333,7 +345,7 @@ def db_get_cache(cache_key: str):
         "SELECT data_json, cached_at FROM video_cache WHERE cache_key=%s",
         (cache_key,),
     )
-    conn.close()
+    put_db(conn)
     if not row:
         return None
     return json.loads(row['data_json'])
@@ -346,22 +358,38 @@ def db_set_cache(cache_key: str, data):
         "ON CONFLICT (cache_key) DO UPDATE SET data_json=EXCLUDED.data_json, cached_at=NOW()",
         (cache_key, json.dumps(data, ensure_ascii=False)),
     )
-    conn.close()
+    put_db(conn)
 
 
 def db_clear_cache(cache_key: str):
     conn = get_db()
     _execute(conn, "DELETE FROM video_cache WHERE cache_key=%s", (cache_key,))
-    conn.close()
+    put_db(conn)
 
 
 # ──────────────────────────────────────────────
 # 공통 영상 카드 렌더링
 # ──────────────────────────────────────────────
 
-def render_video_card(video: dict, key_suffix: str = ""):
+def db_get_processed_ids(video_ids: list[str]) -> set[str]:
+    """여러 video_id의 처리 여부를 한 번에 조회"""
+    if not video_ids:
+        return set()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT video_id FROM processed_videos WHERE video_id = ANY(%s)",
+        (video_ids,)
+    )
+    result = {r[0] for r in cur.fetchall()}
+    cur.close()
+    put_db(conn)
+    return result
+
+
+def render_video_card(video: dict, key_suffix: str = "", processed_ids: set | None = None):
     vid = video['video_id']
-    is_done = db_is_processed(vid)
+    is_done = vid in processed_ids if processed_ids is not None else db_is_processed(vid)
 
     with st.container():
         col1, col2 = st.columns([5, 1])
@@ -539,8 +567,9 @@ with tab2:
                 all_videos.sort(key=lambda v: v['published'], reverse=True)
                 recent_count = sum(1 for v in all_videos if v.get('is_recent', False))
                 st.write(f"**{len(all_videos)}개 영상** (최근 1주일: {recent_count}개)")
+                _pids = db_get_processed_ids([v['video_id'] for v in all_videos])
                 for video in all_videos:
-                    render_video_card(video, key_suffix="ch")
+                    render_video_card(video, key_suffix="ch", processed_ids=_pids)
 
     # ── 키워드 검색 ──
     with collect_tab2:
@@ -599,8 +628,9 @@ with tab2:
                 cached_kw_results.sort(key=lambda v: v.get('published', ''), reverse=True)
                 st.caption("오늘 수집된 캐시 데이터입니다.")
                 st.write(f"**{len(cached_kw_results)}개 영상 발견**")
+                _pids = db_get_processed_ids([v['video_id'] for v in cached_kw_results])
                 for video in cached_kw_results:
-                    render_video_card(video, key_suffix="kw")
+                    render_video_card(video, key_suffix="kw", processed_ids=_pids)
 
         # 여러 키워드 일괄 검색
         st.divider()
@@ -651,8 +681,9 @@ with tab2:
                 cached_bulk.sort(key=lambda v: v.get('published', ''), reverse=True)
                 st.caption("오늘 수집된 캐시 데이터입니다.")
                 st.write(f"**총 {len(cached_bulk)}개 영상 발견 (중복 제거됨)**")
+                _pids = db_get_processed_ids([v['video_id'] for v in cached_bulk])
                 for video in cached_bulk:
-                    render_video_card(video, key_suffix="bulk")
+                    render_video_card(video, key_suffix="bulk", processed_ids=_pids)
 
 
 # ══════════════════════════════════════════════
@@ -1170,7 +1201,7 @@ with tab4:
     rows = _fetchall(conn,
         "SELECT video_id, title, channel_name, processed_at, status FROM processed_videos ORDER BY processed_at DESC LIMIT 50"
     )
-    conn.close()
+    put_db(conn)
 
     if not rows:
         st.info("처리된 영상이 없습니다.")
