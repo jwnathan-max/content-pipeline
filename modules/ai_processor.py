@@ -90,7 +90,7 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
 
 def _summarize_chunk(client: anthropic.Anthropic, chunk: str, chunk_idx: int, total: int) -> str:
     """긴 자막 청크를 핵심 내용으로 요약"""
-    system = _load_prompt("system_prompt.txt")
+    system = _load_prompt("system_prompt_v2.txt")
     prompt = (
         f"아래는 유튜브 영상 자막의 {chunk_idx + 1}/{total} 부분입니다. "
         "핵심 내용을 500자 이내로 요약해주세요.\n\n"
@@ -155,8 +155,8 @@ def generate_content(transcript: str, formats: list[str] | None = None, publishe
             on_progress(msg)
 
     client = _get_client()
-    system = _load_prompt("system_prompt.txt")
-    format_prompt = _load_prompt("content_format.txt")
+    system = _load_prompt("system_prompt_v2.txt")
+    format_prompt = _load_prompt("content_format_v2.txt")
 
     _progress(f"자막 길이: {len(transcript):,}자")
 
@@ -287,7 +287,7 @@ def refine_blog(existing_blog: dict, user_notes: str) -> dict:
         새 blog dict 또는 { 'error': str }
     """
     client = _get_client()
-    system = _load_prompt("system_prompt.txt")
+    system = _load_prompt("system_prompt_v2.txt")
 
     blog_tool = {
         "name": "update_blog",
@@ -415,8 +415,8 @@ def extract_sms_from_blog(blog: dict) -> dict:
 def generate_sms_from_blog(blog: dict) -> dict:
     """블로그 내용을 바탕으로 Claude API로 문자 콘텐츠 생성"""
     client = _get_client()
-    system = _load_prompt("system_prompt.txt")
-    format_prompt = _load_prompt("content_format.txt")
+    system = _load_prompt("system_prompt_v2.txt")
+    format_prompt = _load_prompt("content_format_v2.txt")
 
     sms_tool = _build_tool(['sms'])
 
