@@ -144,7 +144,8 @@ def fetch_recent_videos(channel_id: str, days: int = 7, fetch_limit: int = 15) -
                 f'https://www.youtube.com/channel/{channel_id}/videos',
                 download=False,
             )
-    except Exception:
+    except Exception as e:
+        logger.error("[수집] channel=%s yt-dlp 실패: %s: %s", channel_id, type(e).__name__, str(e)[:300])
         return []
 
     videos = []

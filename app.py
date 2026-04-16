@@ -498,13 +498,20 @@ with tab2:
                 existing_videos = all_videos if all_videos else []
                 existing_ids = {v['video_id'] for v in existing_videos}
                 new_videos = []
+                fail_count = 0
                 progress_bar = st.progress(0, text="채널 불러오는 중...")
                 for i, ch in enumerate(active_channels):
                     progress_bar.progress(
                         i / len(active_channels),
                         text=f"({i+1}/{len(active_channels)}) {ch['channel_name']} 수집 중..."
                     )
-                    videos = fetch_recent_videos(ch['channel_id'])
+                    try:
+                        videos = fetch_recent_videos(ch['channel_id'])
+                    except Exception as e:
+                        st.warning(f"⚠️ {ch['channel_name']} 수집 실패: {e}")
+                        videos = []
+                    if not videos:
+                        fail_count += 1
                     for v in videos:
                         if v['video_id'] not in existing_ids:
                             new_videos.append(v)
@@ -516,6 +523,8 @@ with tab2:
                 db_set_cache('channels', all_videos)
                 if new_videos:
                     st.success(f"새 영상 {len(new_videos)}개 추가됨!")
+                elif fail_count == len(active_channels):
+                    st.error(f"모든 채널({fail_count}개)에서 영상 수집에 실패했습니다. 네트워크 또는 yt-dlp를 확인하세요.")
                 else:
                     st.info("새 영상은 없지만 기존 리스트는 유지됩니다.")
 
