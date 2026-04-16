@@ -22,7 +22,7 @@ from modules.youtube import (
 )
 from modules.ai_processor import generate_content, refine_blog, extract_sms_from_blog, generate_sms_from_blog
 from modules.image_generator import generate_card_image
-from modules.ghost_publisher import publish_post, upload_image, test_connection
+from modules.wordpress_publisher import publish_post, upload_image, test_connection, fetch_published_posts, estimate_pixel_width
 
 load_dotenv()
 
@@ -285,36 +285,34 @@ def process_pending_schedules():
             import logging as _logging
             _logging.info(f"[AutoPublish] video={sched['video_id']} schema_faq keys={list(blog.keys())} faq={blog.get('schema_faq', 'MISSING')}")
             # 이미지 업로드 시도
-            feature_url = None
-            img_key = f"blog_image_{sched['video_id']}"
-            # 이미지는 세션에 없을 수 있으므로 파일에서 시도
+            feature_id = None
             img_dir = Path(__file__).parent / "generated_images"
             img_files = list(img_dir.glob(f"*{sched['video_id']}*")) if img_dir.exists() else []
             if img_files:
                 img_bytes = img_files[0].read_bytes()
                 img_result = upload_image(img_bytes, img_files[0].name)
-                if 'url' in img_result:
-                    feature_url = img_result['url']
+                if 'id' in img_result:
+                    feature_id = img_result['id']
 
             result = publish_post(
                 blog=blog,
-                feature_image_url=feature_url,
+                feature_image_id=feature_id,
             )
 
             if 'error' in result:
                 db_update_scheduled(sched['id'], 'failed', error_msg=result['error'])
-                db_add_publication(sched['video_id'], 'ghost', '', 'failed')
+                db_add_publication(sched['video_id'], 'wordpress', '', 'failed')
             else:
                 db_update_scheduled(
                     sched['id'], 'published',
-                    ghost_post_id=result.get('id', ''),
+                    ghost_post_id=str(result.get('id', '')),
                     ghost_url=result.get('url', ''),
                 )
-                db_add_publication(sched['video_id'], 'ghost', result.get('url', ''), 'published')
+                db_add_publication(sched['video_id'], 'wordpress', result.get('url', ''), 'published')
                 db_save_published_post(
                     blog.get('slug', ''),
                     blog.get('title', ''),
-                    blog.get('tags', [''])[0] if blog.get('tags') else '',
+                    blog.get('category', ''),
                 )
                 published_count += 1
     return published_count
@@ -774,6 +772,15 @@ with tab3:
                     transcript_for_gen = st.session_state.get('transcript_text', '')
                     selected_formats = st.session_state.get('selected_formats', ['sms', 'blog'])
                     existing_posts = db_get_published_posts()
+                    # WordPress API에서도 기존 글 조회하여 병합
+                    try:
+                        wp_posts = fetch_published_posts()
+                        existing_slugs = {p['slug'] for p in existing_posts}
+                        for wp in wp_posts:
+                            if wp['slug'] not in existing_slugs:
+                                existing_posts.append(wp)
+                    except Exception:
+                        pass
                     content = generate_content(transcript_for_gen, formats=selected_formats, published_posts=existing_posts)
                     if 'error' in content:
                         s2.update(label="Step 2: AI 생성 실패", state="error")
@@ -830,24 +837,28 @@ with tab3:
                 if 'blog' in tab_map:
                     with tab_map['blog']:
                         blog = content.get('blog', {})
-                        blog_slug = st.text_input("슬러그 (URL)", value=blog.get('slug', ''), key=f"blog_slug_{video_id}")
+                        blog_slug = st.text_input("퍼머링크", value=blog.get('slug', ''), key=f"blog_slug_{video_id}")
                         blog_title = st.text_input("블로그 제목", value=blog.get('title', ''), key=f"blog_title_{video_id}")
+                        _mt_val = blog.get('meta_title', blog.get('title', ''))
+                        _mt_px = estimate_pixel_width(_mt_val)
                         blog_meta_title = st.text_input(
-                            f"메타 타이틀 (SEO, 60자 이내) — 현재 {len(blog.get('meta_title', blog.get('title', '')))}자",
-                            value=blog.get('meta_title', blog.get('title', '')),
+                            f"스니펫 타이틀 (Rank Math, 550~580px) — 현재 {_mt_px}px",
+                            value=_mt_val,
                             key=f"blog_meta_title_{video_id}",
                         )
-                        blog_excerpt = st.text_area(
-                            "발췌문 (Excerpt) — 블로그 목록에 표시되는 요약",
-                            value=blog.get('excerpt', blog.get('meta_description', '')),
-                            height=80,
-                            key=f"blog_excerpt_{video_id}",
+                        _md_val = blog.get('meta_description', '')
+                        _md_px = estimate_pixel_width(_md_val)
+                        blog_meta = st.text_input(
+                            f"스니펫 설명 (Rank Math, 850~920px) — 현재 {_md_px}px",
+                            value=_md_val,
+                            key=f"blog_meta_{video_id}",
                         )
-                        blog_meta = st.text_input("메타 설명 (SEO)", value=blog.get('meta_description', ''), key=f"blog_meta_{video_id}")
-                        _tag_options = ["value-up", "finance"]
-                        _current_tag = blog.get('tags', ['value-up'])[0] if blog.get('tags') else 'value-up'
-                        _tag_index = _tag_options.index(_current_tag) if _current_tag in _tag_options else 0
-                        blog_tag = st.selectbox("태그", options=_tag_options, index=_tag_index, key=f"blog_tag_{video_id}")
+                        _cat_options = ["재무 전략", "기업 가치"]
+                        _current_cat = blog.get('category', '재무 전략')
+                        _cat_index = _cat_options.index(_current_cat) if _current_cat in _cat_options else 0
+                        blog_category = st.selectbox("카테고리", options=_cat_options, index=_cat_index, key=f"blog_category_{video_id}")
+                        _current_tags = ", ".join(blog.get('tags', []))
+                        blog_tags_str = st.text_input("태그 (쉼표로 구분, 4~5개)", value=_current_tags, key=f"blog_tags_{video_id}")
                         col_edit, col_preview = st.columns(2)
                         with col_edit:
                             st.caption("마크다운 편집")
@@ -892,10 +903,10 @@ with tab3:
                             content['blog']['slug'] = blog_slug
                             content['blog']['title'] = blog_title
                             content['blog']['meta_title'] = blog_meta_title
-                            content['blog']['excerpt'] = blog_excerpt
                             content['blog']['meta_description'] = blog_meta
                             content['blog']['content'] = blog_content
-                            content['blog']['tags'] = [blog_tag]
+                            content['blog']['category'] = blog_category
+                            content['blog']['tags'] = [t.strip() for t in blog_tags_str.split(",") if t.strip()]
                             db_save_content(video_id, video_title, channel_name, content)
                             st.success("저장 완료!")
 
@@ -924,9 +935,9 @@ with tab3:
                                     st.session_state[f'content_{video_id}'] = content
                                     # 위젯 키 초기화 → 새 내용으로 재렌더링
                                     for k in [f'blog_title_{video_id}', f'blog_meta_title_{video_id}',
-                                              f'blog_excerpt_{video_id}',
                                               f'blog_meta_{video_id}', f'blog_content_{video_id}',
-                                              f'blog_tag_{video_id}', f'blog_notes_{video_id}']:
+                                              f'blog_category_{video_id}', f'blog_tags_{video_id}',
+                                              f'blog_notes_{video_id}']:
                                         st.session_state.pop(k, None)
                                     st.success("보완 완료! 에디터가 새 내용으로 업데이트됩니다.")
                                     st.rerun()
@@ -937,7 +948,7 @@ with tab3:
                         st.markdown("**대표 이미지 생성**")
                         img_col1, img_col2 = st.columns([3, 1])
                         with img_col1:
-                            _current_img_tag = st.session_state.get(f"blog_tag_{video_id}", _current_tag)
+                            _current_img_tag = st.session_state.get(f"blog_category_{video_id}", blog.get('category', '재무 전략'))
                             img_category = st.text_input(
                                 "카테고리 태그",
                                 value=_current_img_tag,
@@ -1057,47 +1068,49 @@ with tab3:
                 st.subheader("배포")
 
                 if 'blog' in content:
-                    deploy_tab1, deploy_tab2 = st.tabs(["📰 즉시 발행 (Ghost)", "⏰ 예약 발행"])
+                    deploy_tab1, deploy_tab2 = st.tabs(["📰 즉시 발행 (WordPress)", "⏰ 예약 발행"])
 
                     with deploy_tab1:
-                        st.caption("Ghost 블로그에 즉시 발행합니다.")
+                        st.caption("WordPress 블로그에 즉시 발행합니다.")
                         if st.button("📰 지금 발행", key=f"publish_now_{video_id}", type="primary"):
+                            _tags_str = st.session_state.get(f"blog_tags_{video_id}", ", ".join(content['blog'].get('tags', [])))
                             blog_data = {
                                 'slug': st.session_state.get(f"blog_slug_{video_id}", content['blog'].get('slug', '')),
                                 'title': st.session_state.get(f"blog_title_{video_id}", content['blog'].get('title', '')),
                                 'meta_title': st.session_state.get(f"blog_meta_title_{video_id}", content['blog'].get('meta_title', content['blog'].get('title', ''))),
                                 'meta_description': st.session_state.get(f"blog_meta_{video_id}", content['blog'].get('meta_description', '')),
-                                'excerpt': st.session_state.get(f"blog_excerpt_{video_id}", content['blog'].get('excerpt', '')),
                                 'content': st.session_state.get(f"blog_content_{video_id}", content['blog'].get('content', '')),
-                                'tags': [st.session_state.get(f"blog_tag_{video_id}", content['blog'].get('tags', ['value-up'])[0])],
+                                'category': st.session_state.get(f"blog_category_{video_id}", content['blog'].get('category', '재무 전략')),
+                                'tags': [t.strip() for t in _tags_str.split(",") if t.strip()],
+                                'focus_keyword': content['blog'].get('focus_keyword', ''),
                                 'schema_faq': content['blog'].get('schema_faq', []),
                             }
-                            with st.spinner("Ghost에 발행 중..."):
+                            with st.spinner("WordPress에 발행 중..."):
                                 # 이미지 업로드
-                                feature_url = None
+                                feature_id = None
                                 img_bytes = st.session_state.get(f'blog_image_{video_id}')
                                 if img_bytes:
                                     img_fname = st.session_state.get(f'blog_image_fname_{video_id}', 'feature.png')
                                     img_result = upload_image(img_bytes, img_fname)
-                                    if 'url' in img_result:
-                                        feature_url = img_result['url']
+                                    if 'id' in img_result:
+                                        feature_id = img_result['id']
 
-                                result = publish_post(blog=blog_data, feature_image_url=feature_url)
+                                result = publish_post(blog=blog_data, feature_image_id=feature_id)
 
                             if 'error' in result:
                                 st.error(f"발행 실패: {result['error']}")
-                                db_add_publication(video_id, 'ghost', '', 'failed')
+                                db_add_publication(video_id, 'wordpress', '', 'failed')
                             else:
                                 st.success(f"발행 완료! {result.get('url', '')}")
-                                db_add_publication(video_id, 'ghost', result.get('url', ''), 'published')
+                                db_add_publication(video_id, 'wordpress', result.get('url', ''), 'published')
                                 db_save_published_post(
                                     blog_data.get('slug', ''),
                                     blog_data.get('title', ''),
-                                    blog_data.get('tags', [''])[0] if blog_data.get('tags') else '',
+                                    blog_data.get('category', ''),
                                 )
 
                     with deploy_tab2:
-                        st.caption("예약 시간에 자동으로 Ghost에 발행됩니다.")
+                        st.caption("예약 시간에 자동으로 WordPress에 발행됩니다.")
                         sched_col1, sched_col2 = st.columns(2)
                         with sched_col1:
                             sched_date = st.date_input("발행 날짜", key=f"sched_date_{video_id}")
@@ -1110,7 +1123,7 @@ with tab3:
                                 st.error("예약 시간은 현재 시간 이후여야 합니다.")
                             else:
                                 sched_iso = sched_dt.strftime('%Y-%m-%dT%H:%M:%S')
-                                db_add_scheduled(video_id, 'ghost', sched_iso)
+                                db_add_scheduled(video_id, 'wordpress', sched_iso)
                                 st.success(f"예약 등록 완료: {sched_dt.strftime('%Y-%m-%d %H:%M')}")
 
                 else:
@@ -1175,15 +1188,15 @@ with tab4:
 with tab5:
     st.subheader("예약 발행 관리")
 
-    # Ghost 연결 상태 확인
-    with st.expander("Ghost 연결 상태 확인"):
+    # WordPress 연결 상태 확인
+    with st.expander("WordPress 연결 상태 확인"):
         if st.button("연결 테스트"):
-            with st.spinner("Ghost API 연결 확인 중..."):
+            with st.spinner("WordPress API 연결 확인 중..."):
                 conn_result = test_connection()
             if 'error' in conn_result:
                 st.error(f"연결 실패: {conn_result['error']}")
             else:
-                st.success(f"연결 성공! 사이트: **{conn_result.get('title', '')}** ({conn_result.get('url', '')})")
+                st.success(f"연결 성공! 사용자: **{conn_result.get('title', '')}** ({conn_result.get('url', '')})")
 
     # 예약 시간 도래한 포스트 자동 발행
     st.divider()

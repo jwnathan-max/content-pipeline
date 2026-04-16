@@ -34,12 +34,12 @@ CONTENT_TOOL = {
             "blog": {
                 "type": "object",
                 "properties": {
-                    "slug":             {"type": "string", "description": "URL 슬러그. 핵심 단어만 영문 소문자와 하이픈으로 간결하게 조합. 예: corporate-tax-savings"},
+                    "slug":             {"type": "string", "description": "퍼머링크. 핵심 단어만 영문 소문자와 하이픈으로 간결하게 조합. 예: corporate-tax-savings"},
                     "title":            {"type": "string", "description": "블로그 포스트 제목. 60자 이내, 핵심 키워드 앞쪽 배치."},
-                    "meta_title":       {"type": "string", "description": "검색엔진에 표시되는 메타 타이틀. 60자(characters) 이내. title과 다르게 SEO에 최적화된 형태로 작성."},
-                    "excerpt":          {"type": "string", "description": "Ghost 블로그 목록에 표시되는 요약문. 2~3문장, 독자의 클릭을 유도하는 문장으로 작성."},
-                    "meta_description": {"type": "string", "description": "검색 결과에 표시되는 설명. 145자(characters) 이내."},
+                    "meta_title":       {"type": "string", "description": "Rank Math SEO 스니펫 타이틀. 550~580px 범위로 작성. 한글 약 50~53자 기준. title과 다르게 SEO에 최적화된 형태로 작성."},
+                    "meta_description": {"type": "string", "description": "Rank Math SEO 스니펫 설명. 850~920px 범위로 작성. 한글 약 77~84자 기준."},
                     "focus_keyword":    {"type": "string"},
+                    "category":         {"type": "string", "description": "카테고리. '재무 전략' 또는 '기업 가치' 중 1개 선택."},
                     "schema_faq": {
                         "type": "array",
                         "items": {
@@ -52,9 +52,9 @@ CONTENT_TOOL = {
                         }
                     },
                     "content": {"type": "string"},
-                    "tags":    {"type": "array", "items": {"type": "string"}}
+                    "tags":    {"type": "array", "items": {"type": "string"}, "description": "관련 태그 4~5개. 콘텐츠 주제에 맞는 키워드를 자유롭게 선정."}
                 },
-                "required": ["slug", "title", "meta_title", "excerpt", "meta_description", "focus_keyword", "schema_faq", "content", "tags"]
+                "required": ["slug", "title", "meta_title", "meta_description", "focus_keyword", "category", "schema_faq", "content", "tags"]
             },
             "instagram": {
                 "type": "object",
@@ -217,6 +217,8 @@ def generate_content(transcript: str, formats: list[str] | None = None, publishe
 
     # blog title / meta_title / meta_description 길이 보정
     if "blog" in data:
+        from modules.wordpress_publisher import estimate_pixel_width
+
         blog = data["blog"]
         title = blog.get("title", "")
         meta_title = blog.get("meta_title", "")
@@ -238,13 +240,19 @@ def generate_content(transcript: str, formats: list[str] | None = None, publishe
                 title = title + suffixes[0]
             blog["title"] = title
 
-        # meta_title이 60자 초과이면 잘라내기
-        if len(meta_title) > 60:
-            blog["meta_title"] = meta_title[:60]
+        # meta_title 픽셀 폭 보정 (550~580px 범위)
+        mt_px = estimate_pixel_width(meta_title)
+        if mt_px > 580:
+            while estimate_pixel_width(meta_title) > 580 and len(meta_title) > 10:
+                meta_title = meta_title[:-1]
+            blog["meta_title"] = meta_title
 
-        # meta_description이 145자 초과이면 잘라내기
-        if len(meta) > 145:
-            blog["meta_description"] = meta[:145]
+        # meta_description 픽셀 폭 보정 (850~920px 범위)
+        md_px = estimate_pixel_width(meta)
+        if md_px > 920:
+            while estimate_pixel_width(meta) > 920 and len(meta) > 10:
+                meta = meta[:-1]
+            blog["meta_description"] = meta
 
     return data
 
