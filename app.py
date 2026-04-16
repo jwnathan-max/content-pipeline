@@ -992,7 +992,7 @@ with tab3:
                                 }, ensure_ascii=False, indent=2)
                                 jsonld_code = f'<script type="application/ld+json">\n{jsonld}\n</script>'
                                 st.code(jsonld_code, language="html")
-                                st.caption("ℹ️ 발행 시 Rank Math FAQ Schema로 자동 등록됩니다.")
+                                st.caption("ℹ️ 자동 발행 시 본문 하단에 자동 삽입됩니다. 수동 등록 시 위 코드를 워드프레스 '사용자 정의 HTML' 블록에 붙여넣으세요.")
                         if st.button("💾 블로그 내용 저장", key=f"save_blog_{video_id}"):
                             content['blog']['slug'] = blog_slug
                             content['blog']['title'] = blog_title

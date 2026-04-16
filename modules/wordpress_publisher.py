@@ -163,15 +163,10 @@ def publish_post(
         },
     }
 
-    # FAQ Schema → Rank Math 메타로 전달 (자동 구조화 데이터 생성)
+    # FAQ Schema → 본문 하단에 JSON-LD 삽입 (Rank Math Pro 불필요)
     if schema_faq:
-        faq_schema = {
-            "metadata": {
-                "title": "FAQPage",
-                "type": "template",
-                "shortcode": "s-fbc3b98b-2694-4e94-9169-b2b116ce6204",
-                "isPrimary": False,
-            },
+        faq_jsonld = {
+            "@context": "https://schema.org",
             "@type": "FAQPage",
             "mainEntity": [
                 {
@@ -185,10 +180,8 @@ def publish_post(
                 for faq in schema_faq
             ],
         }
-        post["meta"]["rank_math_schema"] = json.dumps(
-            {"BlogPosting": post["meta"].get("rank_math_schema", {}), "FAQPage": faq_schema},
-            ensure_ascii=False,
-        )
+        faq_script = f'<script type="application/ld+json">{json.dumps(faq_jsonld, ensure_ascii=False)}</script>'
+        post["content"] = post["content"] + "\n" + faq_script
 
     # 피처 이미지
     if feature_image_id:
