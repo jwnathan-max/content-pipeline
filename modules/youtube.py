@@ -41,8 +41,12 @@ def _get_yt_api() -> YouTubeTranscriptApi:
         _yt_api = YouTubeTranscriptApi()
         return _yt_api
 
+    logger.info("[자막] 쿠키 원문 첫 200자: %s", repr(cookie_text[:200]))
+
     # Netscape 쿠키 텍스트 → 임시 파일 → MozillaCookieJar → requests.Session
     cookie_path = _write_cookie_file(cookie_text)
+    with open(cookie_path, 'r', encoding='utf-8') as f:
+        logger.info("[자막] 쿠키 파일 첫 3줄: %s", repr(f.readlines()[:3]))
 
     jar = MozillaCookieJar(cookie_path)
     jar.load(ignore_discard=True, ignore_expires=True)
