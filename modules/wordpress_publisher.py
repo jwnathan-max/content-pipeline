@@ -42,7 +42,7 @@ def _get_or_create_category(config: dict, category_name: str) -> int | None:
     url = f"{config['api_url']}/wp-json/wp/v2/categories"
 
     # 검색
-    resp = requests.get(url, headers=headers, params={"search": category_name}, timeout=10)
+    resp = requests.get(url, headers=headers, params={"search": category_name}, timeout=30)
     if resp.status_code == 200:
         for cat in resp.json():
             if cat["name"] == category_name:
@@ -52,7 +52,7 @@ def _get_or_create_category(config: dict, category_name: str) -> int | None:
     resp = requests.post(
         url, headers=headers,
         json={"name": category_name},
-        timeout=10,
+        timeout=30,
     )
     if resp.status_code in (200, 201):
         return resp.json()["id"]
@@ -71,7 +71,7 @@ def _get_or_create_tags(config: dict, tag_names: list[str]) -> list[int]:
         if not name:
             continue
         # 검색
-        resp = requests.get(url, headers=headers, params={"search": name}, timeout=10)
+        resp = requests.get(url, headers=headers, params={"search": name}, timeout=30)
         found = False
         if resp.status_code == 200:
             for tag in resp.json():
@@ -81,7 +81,7 @@ def _get_or_create_tags(config: dict, tag_names: list[str]) -> list[int]:
                     break
         if not found:
             # 생성
-            resp = requests.post(url, headers=headers, json={"name": name}, timeout=10)
+            resp = requests.post(url, headers=headers, json={"name": name}, timeout=30)
             if resp.status_code in (200, 201):
                 tag_ids.append(resp.json()["id"])
             else:
@@ -271,7 +271,7 @@ def test_connection() -> dict:
         resp = requests.get(
             f"{config['api_url']}/wp-json/wp/v2/users/me",
             headers=headers,
-            timeout=10,
+            timeout=30,
         )
         resp.raise_for_status()
         user = resp.json()
