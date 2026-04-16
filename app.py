@@ -1019,12 +1019,16 @@ with tab3:
                                     content['blog'].update(refined)
                                     db_save_content(video_id, video_title, channel_name, content)
                                     st.session_state[f'content_{video_id}'] = content
-                                    # 위젯 키 초기화 → 새 내용으로 재렌더링
-                                    for k in [f'blog_title_{video_id}', f'blog_meta_title_{video_id}',
-                                              f'blog_meta_{video_id}', f'blog_content_{video_id}',
-                                              f'blog_category_{video_id}', f'blog_tags_{video_id}',
-                                              f'blog_notes_{video_id}']:
-                                        st.session_state.pop(k, None)
+                                    # 위젯 값을 직접 새 내용으로 설정 (pop 대신)
+                                    updated = content['blog']
+                                    st.session_state[f'blog_title_{video_id}'] = updated.get('title', '')
+                                    st.session_state[f'blog_meta_title_{video_id}'] = updated.get('meta_title', updated.get('title', ''))
+                                    st.session_state[f'blog_meta_{video_id}'] = updated.get('meta_description', '')
+                                    st.session_state[f'blog_content_{video_id}'] = updated.get('content', '')
+                                    st.session_state[f'blog_tags_{video_id}'] = ', '.join(updated.get('tags', []))
+                                    st.session_state.pop(f'blog_notes_{video_id}', None)
+                                    # selectbox는 직접 값 설정 불가 → pop 후 rerun
+                                    st.session_state.pop(f'blog_category_{video_id}', None)
                                     st.success("보완 완료! 에디터가 새 내용으로 업데이트됩니다.")
                                     st.rerun()
                             else:
