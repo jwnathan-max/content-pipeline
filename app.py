@@ -217,13 +217,18 @@ def db_get_content(video_id: str) -> dict | None:
 # 예약 발행 헬퍼
 # ──────────────────────────────────────────────
 
-def db_add_scheduled(video_id: str, channel: str, scheduled_at: str):
+def db_add_scheduled(video_id: str, channel: str, scheduled_at: str) -> int | None:
     conn = get_db()
-    _execute(conn,
-        "INSERT INTO scheduled_posts (video_id, channel, scheduled_at) VALUES (%s, %s, %s)",
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO scheduled_posts (video_id, channel, scheduled_at) VALUES (%s, %s, %s) RETURNING id",
         (video_id, channel, scheduled_at),
     )
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
     put_db(conn)
+    return row[0] if row else None
 
 
 def db_get_scheduled(status: str | None = None) -> list:
@@ -1200,8 +1205,33 @@ with tab3:
                                 st.error("예약 시간은 현재 시간 이후여야 합니다.")
                             else:
                                 sched_iso = sched_dt.strftime('%Y-%m-%dT%H:%M:%S')
-                                db_add_scheduled(video_id, 'wordpress', sched_iso)
-                                st.success(f"예약 등록 완료: {sched_dt.strftime('%Y-%m-%d %H:%M')}")
+                                with st.spinner("WordPress에 예약 발행 중..."):
+                                    blog_data = content.get('blog', {})
+                                    # 이미지 업로드
+                                    feature_id = None
+                                    img_bytes = st.session_state.get(f'blog_image_{video_id}')
+                                    if img_bytes:
+                                        img_fname = st.session_state.get(f'blog_image_fname_{video_id}', 'feature.png')
+                                        img_result = upload_image(img_bytes, img_fname)
+                                        if 'id' in img_result:
+                                            feature_id = img_result['id']
+
+                                    result = publish_post(
+                                        blog=blog_data,
+                                        feature_image_id=feature_id,
+                                        scheduled_at=sched_iso,
+                                    )
+
+                                if 'error' in result:
+                                    st.error(f"예약 실패: {result['error']}")
+                                else:
+                                    sched_id = db_add_scheduled(video_id, 'wordpress', sched_iso)
+                                    if sched_id:
+                                        db_update_scheduled(sched_id, 'published',
+                                            ghost_post_id=str(result.get('id', '')),
+                                            ghost_url=result.get('url', ''))
+                                    db_add_publication(video_id, 'wordpress', result.get('url', ''), 'scheduled')
+                                    st.success(f"예약 완료: {sched_dt.strftime('%Y-%m-%d %H:%M')} — WordPress에서 자동 발행됩니다.")
 
                 else:
                     st.info("블로그 콘텐츠를 먼저 생성해주세요.")
