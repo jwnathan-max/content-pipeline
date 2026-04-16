@@ -139,32 +139,43 @@ def _build_tool(formats: list[str]) -> dict:
     return tool
 
 
-def generate_content(transcript: str, formats: list[str] | None = None, published_posts: list[dict] | None = None) -> dict:
+def generate_content(transcript: str, formats: list[str] | None = None, published_posts: list[dict] | None = None, on_progress=None) -> dict:
     """
     자막으로 선택된 포맷의 콘텐츠 생성
     formats: 생성할 포맷 목록 ['sms', 'blog', 'instagram'] (None이면 전체)
+    on_progress: 콜백 함수 (message: str) — 진행 상황 표시용
     반환: { 'sms': {...}, 'blog': {...}, 'instagram': {...} } (선택된 것만)
     에러 시: { 'error': str }
     """
     if formats is None:
         formats = ['sms', 'blog', 'instagram']
 
+    def _progress(msg):
+        if on_progress:
+            on_progress(msg)
+
     client = _get_client()
     system = _load_prompt("system_prompt.txt")
     format_prompt = _load_prompt("content_format.txt")
 
+    _progress(f"자막 길이: {len(transcript):,}자")
+
     # 긴 자막 처리: 청크 분할 → 요약 → 재통합
     if len(transcript) > CHUNK_SIZE:
         chunks = _chunk_text(transcript)
+        _progress(f"자막이 길어 {len(chunks)}개 청크로 분할하여 요약합니다...")
         summaries = []
         for i, chunk in enumerate(chunks):
+            _progress(f"청크 {i+1}/{len(chunks)} 요약 중...")
             summary = _summarize_chunk(client, chunk, i, len(chunks))
             summaries.append(summary)
+            _progress(f"청크 {i+1}/{len(chunks)} 요약 완료 ✓")
         combined = "\n\n".join(summaries)
         if len(combined) > 6000:
             combined = combined[:6000] + "\n\n[이하 생략 — 핵심 내용 위주로 생성]"
         user_content = format_prompt + combined
     else:
+        _progress("자막 길이가 적당하여 바로 콘텐츠를 생성합니다.")
         user_content = format_prompt + transcript
 
     # 선택된 포맷 안내를 프롬프트에 추가
@@ -186,6 +197,10 @@ def generate_content(transcript: str, formats: list[str] | None = None, publishe
 
     tool = _build_tool(formats)
 
+    format_names = {'sms': '문자', 'blog': '블로그', 'instagram': '인스타그램'}
+    label = ', '.join(format_names.get(f, f) for f in formats)
+    _progress(f"Claude API 호출 중... ({label} 생성)")
+
     try:
         response = client.messages.create(
             model=MODEL,
@@ -195,6 +210,8 @@ def generate_content(transcript: str, formats: list[str] | None = None, publishe
             tool_choice={"type": "tool", "name": "publish_content"},
             messages=[{"role": "user", "content": user_content}],
         )
+
+        _progress("API 응답 수신 완료, 결과 처리 중...")
 
         # tool_use 블록에서 input 추출
         for block in response.content:

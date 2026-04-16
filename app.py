@@ -801,7 +801,12 @@ with tab3:
                                 existing_posts.append(wp)
                     except Exception:
                         pass
-                    content = generate_content(transcript_for_gen, formats=selected_formats, published_posts=existing_posts)
+                    content = generate_content(
+                        transcript_for_gen,
+                        formats=selected_formats,
+                        published_posts=existing_posts,
+                        on_progress=lambda msg: st.write(msg),
+                    )
                     if 'error' in content:
                         s2.update(label="Step 2: AI 생성 실패", state="error")
                         st.error(content['error'])
