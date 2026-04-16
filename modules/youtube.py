@@ -120,8 +120,9 @@ def resolve_channel_from_url(url: str) -> dict | None:
 
 def fetch_recent_videos(channel_id: str, days: int = 7, fetch_limit: int = 15) -> list[dict]:
     """
-    yt-dlp로 채널 최신 fetch_limit개를 가져온 뒤 days일 내 영상만 반환
-    반환: [{ video_id, title, published, channel_name, url }, ...]
+    yt-dlp로 채널 최신 fetch_limit개를 가져온다.
+    days일 내 영상은 is_recent=True, 그 이전 영상은 is_recent=False로 표시.
+    반환: [{ video_id, title, published, channel_name, url, is_recent }, ...]
     """
     try:
         import yt_dlp
@@ -153,12 +154,12 @@ def fetch_recent_videos(channel_id: str, days: int = 7, fetch_limit: int = 15) -
             continue
 
         upload_date = entry.get('upload_date', '')
+        is_recent = False
         if upload_date and len(upload_date) == 8:
             published = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}T00:00:00+00:00"
             from datetime import date
             published_date = date(int(upload_date[:4]), int(upload_date[4:6]), int(upload_date[6:8]))
-            if published_date < cutoff:
-                continue
+            is_recent = published_date >= cutoff
         else:
             published = ''
 
@@ -168,6 +169,7 @@ def fetch_recent_videos(channel_id: str, days: int = 7, fetch_limit: int = 15) -
             'published': published,
             'channel_name': entry.get('channel') or entry.get('uploader', ''),
             'url': f"https://www.youtube.com/watch?v={video_id}",
+            'is_recent': is_recent,
         })
 
     return videos

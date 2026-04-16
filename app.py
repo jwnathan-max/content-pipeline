@@ -525,10 +525,11 @@ with tab2:
                 st.caption("이전 수집 결과입니다. 최신 영상을 보려면 📡 수집하기를 클릭하세요.")
 
             if all_videos is not None and len(all_videos) == 0:
-                st.info("최근 1주일 내 새 영상이 없습니다.")
+                st.info("수집된 영상이 없습니다. 채널에 영상이 있는지 확인하세요.")
             elif all_videos:
                 all_videos.sort(key=lambda v: v['published'], reverse=True)
-                st.write(f"**{len(all_videos)}개 영상 발견**")
+                recent_count = sum(1 for v in all_videos if v.get('is_recent', False))
+                st.write(f"**{len(all_videos)}개 영상** (최근 1주일: {recent_count}개)")
                 for video in all_videos:
                     render_video_card(video, key_suffix="ch")
 
