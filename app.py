@@ -1016,20 +1016,18 @@ with tab3:
                                 if 'error' in refined:
                                     st.error(refined['error'])
                                 else:
-                                    content['blog'].update(refined)
-                                    db_save_content(video_id, video_title, channel_name, content)
-                                    st.session_state[f'content_{video_id}'] = content
-                                    # 위젯 값을 직접 새 내용으로 설정 (pop 대신)
-                                    updated = content['blog']
-                                    st.session_state[f'blog_title_{video_id}'] = updated.get('title', '')
-                                    st.session_state[f'blog_meta_title_{video_id}'] = updated.get('meta_title', updated.get('title', ''))
-                                    st.session_state[f'blog_meta_{video_id}'] = updated.get('meta_description', '')
-                                    st.session_state[f'blog_content_{video_id}'] = updated.get('content', '')
-                                    st.session_state[f'blog_tags_{video_id}'] = ', '.join(updated.get('tags', []))
-                                    st.session_state.pop(f'blog_notes_{video_id}', None)
-                                    # selectbox는 직접 값 설정 불가 → pop 후 rerun
-                                    st.session_state.pop(f'blog_category_{video_id}', None)
-                                    st.success("보완 완료! 에디터가 새 내용으로 업데이트됩니다.")
+                                    import copy
+                                    content_copy = copy.deepcopy(content)
+                                    content_copy['blog'].update(refined)
+                                    db_save_content(video_id, video_title, channel_name, content_copy)
+                                    st.session_state[f'content_{video_id}'] = content_copy
+                                    # 위젯 키 삭제 → rerun 시 content_copy에서 새 값으로 재렌더링
+                                    for k in [f'blog_title_{video_id}', f'blog_slug_{video_id}',
+                                              f'blog_meta_title_{video_id}', f'blog_meta_{video_id}',
+                                              f'blog_content_{video_id}', f'blog_category_{video_id}',
+                                              f'blog_tags_{video_id}', f'blog_notes_{video_id}']:
+                                        if k in st.session_state:
+                                            del st.session_state[k]
                                     st.rerun()
                             else:
                                 st.warning("보완 메모를 입력해주세요.")
