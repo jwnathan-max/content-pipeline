@@ -922,6 +922,14 @@ with tab3:
 
                 if 'blog' in tab_map:
                     with tab_map['blog']:
+                        # 보완 재작성 후 위젯 키 초기화 (렌더링 전에 수행해야 함)
+                        if st.session_state.pop(f'_refine_done_{video_id}', False):
+                            for k in [f'blog_title_{video_id}', f'blog_slug_{video_id}',
+                                      f'blog_meta_title_{video_id}', f'blog_meta_{video_id}',
+                                      f'blog_content_{video_id}', f'blog_category_{video_id}',
+                                      f'blog_tags_{video_id}', f'blog_notes_{video_id}']:
+                                st.session_state.pop(k, None)
+                            st.success("보완 완료! 새 내용이 반영되었습니다.")
                         blog = content.get('blog', {})
                         blog_slug = st.text_input("퍼머링크", value=blog.get('slug', ''), key=f"blog_slug_{video_id}")
                         blog_title = st.text_input("블로그 제목", value=blog.get('title', ''), key=f"blog_title_{video_id}")
@@ -1021,13 +1029,8 @@ with tab3:
                                     content_copy['blog'].update(refined)
                                     db_save_content(video_id, video_title, channel_name, content_copy)
                                     st.session_state[f'content_{video_id}'] = content_copy
-                                    # 위젯 키 삭제 → rerun 시 content_copy에서 새 값으로 재렌더링
-                                    for k in [f'blog_title_{video_id}', f'blog_slug_{video_id}',
-                                              f'blog_meta_title_{video_id}', f'blog_meta_{video_id}',
-                                              f'blog_content_{video_id}', f'blog_category_{video_id}',
-                                              f'blog_tags_{video_id}', f'blog_notes_{video_id}']:
-                                        if k in st.session_state:
-                                            del st.session_state[k]
+                                    # 플래그 설정 → rerun 후 위젯 렌더링 전에 키 삭제
+                                    st.session_state[f'_refine_done_{video_id}'] = True
                                     st.rerun()
                             else:
                                 st.warning("보완 메모를 입력해주세요.")
