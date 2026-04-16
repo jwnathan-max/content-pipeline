@@ -14,7 +14,19 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 
 logger = logging.getLogger(__name__)
 
+NETSCAPE_HEADER = "# Netscape HTTP Cookie File\n"
+
 _yt_api: YouTubeTranscriptApi | None = None
+
+
+def _write_cookie_file(cookie_text: str) -> str:
+    """쿠키 텍스트를 Netscape 헤더 포함 임시 파일로 저장하고 경로 반환"""
+    if not cookie_text.startswith("# Netscape") and not cookie_text.startswith("# HTTP Cookie"):
+        cookie_text = NETSCAPE_HEADER + cookie_text
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+    tmp.write(cookie_text)
+    tmp.close()
+    return tmp.name
 
 
 def _get_yt_api() -> YouTubeTranscriptApi:
@@ -30,13 +42,11 @@ def _get_yt_api() -> YouTubeTranscriptApi:
         return _yt_api
 
     # Netscape 쿠키 텍스트 → 임시 파일 → MozillaCookieJar → requests.Session
-    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
-    tmp.write(cookie_text)
-    tmp.close()
+    cookie_path = _write_cookie_file(cookie_text)
 
-    jar = MozillaCookieJar(tmp.name)
+    jar = MozillaCookieJar(cookie_path)
     jar.load(ignore_discard=True, ignore_expires=True)
-    os.unlink(tmp.name)
+    os.unlink(cookie_path)
 
     session = requests.Session()
     session.cookies = jar
@@ -272,10 +282,7 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
     # yt-dlp에도 쿠키 전달
     cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
     if cookie_text:
-        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
-        tmp.write(cookie_text)
-        tmp.close()
-        ydl_opts['cookiefile'] = tmp.name
+        ydl_opts['cookiefile'] = _write_cookie_file(cookie_text)
         logger.info("[자막/yt-dlp] 쿠키 파일 적용")
 
     try:
