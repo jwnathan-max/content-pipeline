@@ -850,6 +850,24 @@ with tab3:
                         st.session_state['gen_state'] = 'done'
                         s2.update(label="Step 2: 콘텐츠 생성 완료 ✅", state="complete")
 
+                # Step 2.5: 블로그 이미지 자동 생성
+                content_now = st.session_state.get(f'content_{video_id}')
+                if content_now and 'blog' in content_now and f'blog_img_{video_id}' not in st.session_state:
+                    with st.status("Step 2.5: 블로그 대표 이미지 생성 중...", expanded=True) as s_img:
+                        blog_title = content_now['blog'].get('title', video_title)
+                        blog_category = content_now['blog'].get('category', '법인 컨설팅')
+                        _img_save_dir = Path(__file__).parent / "generated_images"
+                        _img_save_dir.mkdir(parents=True, exist_ok=True)
+                        blog_img_bytes = generate_card_image(
+                            title=blog_title,
+                            category=blog_category,
+                            size="blog",
+                            save_path=_img_save_dir / f"blog_{video_id}.png",
+                        )
+                        st.session_state[f'blog_img_{video_id}'] = blog_img_bytes
+                        st.image(blog_img_bytes, caption="블로그 대표 이미지 (1200×630)", use_container_width=True)
+                        s_img.update(label="Step 2.5: 대표 이미지 생성 완료 ✅", state="complete")
+
             # ── 상태: 대기 중 (생성 버튼 표시) ──
             elif not st.session_state.get(f'content_{video_id}'):
                 if already_done:
@@ -1142,9 +1160,9 @@ with tab3:
                                 'schema_faq': content['blog'].get('schema_faq', []),
                             }
                             with st.spinner("WordPress에 발행 중..."):
-                                # 이미지 업로드
+                                # 이미지 업로드 (수동 생성 → 자동 생성 순으로 확인)
                                 feature_id = None
-                                img_bytes = st.session_state.get(f'blog_image_{video_id}')
+                                img_bytes = st.session_state.get(f'blog_image_{video_id}') or st.session_state.get(f'blog_img_{video_id}')
                                 if img_bytes:
                                     img_fname = st.session_state.get(f'blog_image_fname_{video_id}', 'feature.png')
                                     img_result = upload_image(img_bytes, img_fname)
