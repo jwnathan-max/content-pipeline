@@ -281,6 +281,7 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
         'skip_download': True,
         'writesubtitles': True, 'writeautomaticsub': True,
         'subtitleslangs': ['ko', 'ko-KR', 'en', 'en-US'],
+        'ignore_no_formats_error': True,
     }
 
     # yt-dlp에도 쿠키 전달
