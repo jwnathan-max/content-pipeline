@@ -722,30 +722,38 @@ with tab3:
                 st.session_state.pop('transcript_text', None)
                 st.rerun()
         url_input = target['url']
-    else:
-        url_col1, url_col2 = st.columns([5, 1])
-        with url_col1:
-            url_input = st.text_input("YouTube URL 직접 입력", placeholder="https://www.youtube.com/watch?v=...", key="manual_url_input")
-        with url_col2:
-            st.write("")
-            st.write("")
-            start_clicked = st.button("생성 시작", key="start_from_url", use_container_width=True)
 
-        if start_clicked:
-            vid = extract_video_id(url_input or "")
-            if not vid:
-                st.error("유효한 YouTube URL이 아닙니다.")
+    # URL 직접 입력 — 항상 표시 (새 영상으로 즉시 전환 가능)
+    new_url_label = "다른 YouTube URL로 새로 생성" if target else "YouTube URL 직접 입력"
+    url_col1, url_col2 = st.columns([5, 1])
+    with url_col1:
+        manual_url = st.text_input(new_url_label, placeholder="https://www.youtube.com/watch?v=...", key="manual_url_input")
+    with url_col2:
+        st.write("")
+        st.write("")
+        start_clicked = st.button("생성 시작", key="start_from_url", use_container_width=True)
+
+    if start_clicked:
+        vid = extract_video_id(manual_url or "")
+        if not vid:
+            st.error("유효한 YouTube URL이 아닙니다.")
+        else:
+            with st.spinner("영상 정보 조회 중..."):
+                meta = fetch_video_metadata(vid)
+            if not meta:
+                st.error("영상 메타데이터 조회에 실패했습니다. URL을 다시 확인해주세요.")
             else:
-                with st.spinner("영상 정보 조회 중..."):
-                    meta = fetch_video_metadata(vid)
-                if not meta:
-                    st.error("영상 메타데이터 조회에 실패했습니다. URL을 다시 확인해주세요.")
-                else:
-                    st.session_state['target_video'] = meta
-                    st.session_state['auto_generate'] = True
-                    st.session_state['gen_state'] = 'idle'
-                    st.session_state.pop('transcript_text', None)
-                    st.rerun()
+                st.session_state['target_video'] = meta
+                st.session_state['auto_generate'] = True
+                st.session_state['gen_state'] = 'idle'
+                st.session_state.pop('transcript_text', None)
+                for k in list(st.session_state.keys()):
+                    if k.startswith('content_'):
+                        del st.session_state[k]
+                st.rerun()
+
+    if not target:
+        url_input = manual_url
 
     if url_input:
         video_id = extract_video_id(url_input)
