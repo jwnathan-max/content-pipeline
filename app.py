@@ -22,6 +22,7 @@ from modules.youtube import (
     extract_video_id,
     is_transcript_too_short,
     resolve_channel_from_url,
+    fetch_video_metadata,
 )
 from modules.ai_processor import generate_content, refine_blog, extract_sms_from_blog, generate_sms_from_blog
 from modules.image_generator import generate_card_image
@@ -722,7 +723,29 @@ with tab3:
                 st.rerun()
         url_input = target['url']
     else:
-        url_input = st.text_input("YouTube URL 직접 입력", placeholder="https://www.youtube.com/watch?v=...")
+        url_col1, url_col2 = st.columns([5, 1])
+        with url_col1:
+            url_input = st.text_input("YouTube URL 직접 입력", placeholder="https://www.youtube.com/watch?v=...", key="manual_url_input")
+        with url_col2:
+            st.write("")
+            st.write("")
+            start_clicked = st.button("생성 시작", key="start_from_url", use_container_width=True)
+
+        if start_clicked:
+            vid = extract_video_id(url_input or "")
+            if not vid:
+                st.error("유효한 YouTube URL이 아닙니다.")
+            else:
+                with st.spinner("영상 정보 조회 중..."):
+                    meta = fetch_video_metadata(vid)
+                if not meta:
+                    st.error("영상 메타데이터 조회에 실패했습니다. URL을 다시 확인해주세요.")
+                else:
+                    st.session_state['target_video'] = meta
+                    st.session_state['auto_generate'] = True
+                    st.session_state['gen_state'] = 'idle'
+                    st.session_state.pop('transcript_text', None)
+                    st.rerun()
 
     if url_input:
         video_id = extract_video_id(url_input)

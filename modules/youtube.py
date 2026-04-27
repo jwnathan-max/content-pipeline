@@ -132,6 +132,35 @@ def resolve_channel_from_url(url: str) -> dict | None:
     return None
 
 
+def fetch_video_metadata(video_id: str) -> dict | None:
+    """
+    yt-dlp로 단일 영상의 제목/채널명을 조회.
+    반환: { video_id, title, channel_name, url } 또는 None
+    """
+    try:
+        import yt_dlp
+    except ImportError:
+        return None
+
+    ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(
+                f'https://www.youtube.com/watch?v={video_id}',
+                download=False,
+            )
+    except Exception as e:
+        logger.error("[메타] video=%s 조회 실패: %s: %s", video_id, type(e).__name__, str(e)[:300])
+        return None
+
+    return {
+        'video_id': video_id,
+        'title': info.get('title') or video_id,
+        'channel_name': info.get('uploader') or info.get('channel') or '',
+        'url': f'https://www.youtube.com/watch?v={video_id}',
+    }
+
+
 def fetch_recent_videos(channel_id: str, days: int = 7, fetch_limit: int = 15) -> list[dict]:
     """
     yt-dlp로 채널 최신 fetch_limit개를 가져온다.
