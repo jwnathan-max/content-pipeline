@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MODEL = "claude-sonnet-4-5"
+SUMMARY_MODEL = "claude-haiku-4-5-20251001"
 MAX_TOKENS = 8000
 CHUNK_SIZE = 8000  # 자막 청크 단위 (자)
 
@@ -89,8 +90,11 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
 
 
 def _summarize_chunk(client: anthropic.Anthropic, chunk: str, chunk_idx: int, total: int) -> str:
-    """긴 자막 청크를 핵심 내용으로 요약"""
-    system = _load_prompt("system_prompt_v2.txt")
+    """긴 자막 청크를 핵심 내용으로 요약 (Haiku 사용 — 단순 요약 작업)"""
+    system = (
+        "당신은 한국어 영상 자막을 정확하게 요약하는 어시스턴트입니다. "
+        "자막에 없는 정보를 추가하지 않고, 사실 그대로 핵심만 추출합니다."
+    )
     prompt = (
         f"아래는 유튜브 영상 자막의 {chunk_idx + 1}/{total} 부분입니다. "
         "핵심 내용을 500자 이내로 요약해주세요.\n\n"
@@ -101,7 +105,7 @@ def _summarize_chunk(client: anthropic.Anthropic, chunk: str, chunk_idx: int, to
         f"{chunk}"
     )
     response = client.messages.create(
-        model=MODEL,
+        model=SUMMARY_MODEL,
         max_tokens=600,
         system=system,
         messages=[{"role": "user", "content": prompt}],
@@ -205,8 +209,8 @@ def generate_content(transcript: str, formats: list[str] | None = None, publishe
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            system=system,
-            tools=[tool],
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            tools=[{**tool, "cache_control": {"type": "ephemeral"}}],
             tool_choice={"type": "tool", "name": "publish_content"},
             messages=[{"role": "user", "content": user_content}],
         )
@@ -336,8 +340,8 @@ excerpt와 FAQ도 기존 맥락을 유지하면서 보완해주세요.
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            system=system,
-            tools=[blog_tool],
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            tools=[{**blog_tool, "cache_control": {"type": "ephemeral"}}],
             tool_choice={"type": "tool", "name": "update_blog"},
             messages=[{"role": "user", "content": prompt}],
         )
@@ -435,8 +439,8 @@ def generate_sms_from_blog(blog: dict) -> dict:
         response = client.messages.create(
             model=MODEL,
             max_tokens=2000,
-            system=system,
-            tools=[sms_tool],
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            tools=[{**sms_tool, "cache_control": {"type": "ephemeral"}}],
             tool_choice={"type": "tool", "name": "publish_content"},
             messages=[{"role": "user", "content": prompt}],
         )
