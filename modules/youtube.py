@@ -29,6 +29,14 @@ def _write_cookie_file(cookie_text: str) -> str:
     return tmp.name
 
 
+def _apply_ytdlp_cookies(ydl_opts: dict) -> dict:
+    """YOUTUBE_COOKIES 환경변수가 있으면 yt-dlp 옵션에 cookiefile 주입"""
+    cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    if cookie_text:
+        ydl_opts['cookiefile'] = _write_cookie_file(cookie_text)
+    return ydl_opts
+
+
 def _get_yt_api() -> YouTubeTranscriptApi:
     """쿠키 인증된 API 인스턴스를 lazy 생성 (호출 시점에 환경변수 읽기)"""
     global _yt_api
@@ -98,8 +106,8 @@ def resolve_channel_from_url(url: str) -> dict | None:
         # 채널명은 yt-dlp로 확인
         try:
             import yt_dlp
-            with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True,
-                                    'skip_download': True, 'playlist_items': '1'}) as ydl:
+            with yt_dlp.YoutubeDL(_apply_ytdlp_cookies({'quiet': True, 'no_warnings': True,
+                                    'skip_download': True, 'playlist_items': '1'})) as ydl:
                 info = ydl.extract_info(url, download=False)
                 name = info.get('channel') or info.get('uploader') or channel_id
         except Exception:
@@ -119,8 +127,8 @@ def resolve_channel_from_url(url: str) -> dict | None:
         fetch_url = url
 
     try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True,
-                                'skip_download': True, 'playlist_items': '1'}) as ydl:
+        with yt_dlp.YoutubeDL(_apply_ytdlp_cookies({'quiet': True, 'no_warnings': True,
+                                'skip_download': True, 'playlist_items': '1'})) as ydl:
             info = ydl.extract_info(fetch_url, download=False)
             channel_id = info.get('channel_id') or info.get('uploader_id')
             channel_name = info.get('channel') or info.get('uploader') or channel_id
@@ -142,7 +150,7 @@ def fetch_video_metadata(video_id: str) -> dict | None:
     except ImportError:
         return None
 
-    ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+    ydl_opts = _apply_ytdlp_cookies({'quiet': True, 'no_warnings': True, 'skip_download': True})
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(
@@ -174,12 +182,12 @@ def fetch_recent_videos(channel_id: str, days: int = 7, fetch_limit: int = 15) -
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date()
 
-    ydl_opts = {
+    ydl_opts = _apply_ytdlp_cookies({
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
         'playlist_items': f'1-{fetch_limit}',
-    }
+    })
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -313,10 +321,8 @@ def _get_transcript_ytdlp(video_id: str) -> dict:
         'ignore_no_formats_error': True,
     }
 
-    # yt-dlp에도 쿠키 전달
-    cookie_text = os.environ.get("YOUTUBE_COOKIES", "").strip()
-    if cookie_text:
-        ydl_opts['cookiefile'] = _write_cookie_file(cookie_text)
+    _apply_ytdlp_cookies(ydl_opts)
+    if 'cookiefile' in ydl_opts:
         logger.info("[자막/yt-dlp] 쿠키 파일 적용")
 
     try:
@@ -481,11 +487,11 @@ def search_videos_by_keyword(keyword: str, max_results: int = 20) -> list[dict]:
     except ImportError:
         return []
 
-    ydl_opts = {
+    ydl_opts = _apply_ytdlp_cookies({
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
-    }
+    })
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
