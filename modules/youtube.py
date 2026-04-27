@@ -150,7 +150,10 @@ def fetch_video_metadata(video_id: str) -> dict | None:
     except ImportError:
         return None
 
-    ydl_opts = _apply_ytdlp_cookies({'quiet': True, 'no_warnings': True, 'skip_download': True})
+    ydl_opts = _apply_ytdlp_cookies({
+        'quiet': True, 'no_warnings': True, 'skip_download': True,
+        'ignore_no_formats_error': True,
+    })
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(
