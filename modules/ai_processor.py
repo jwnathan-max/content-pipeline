@@ -35,7 +35,7 @@ CONTENT_TOOL = {
             "blog": {
                 "type": "object",
                 "properties": {
-                    "slug":             {"type": "string", "description": "퍼머링크. 핵심 단어만 영문 소문자와 하이픈으로 간결하게 조합. 예: corporate-tax-savings"},
+                    "slug":             {"type": "string", "description": "퍼머링크. 핵심 단어만 한국어와 하이픈으로 간결하게 조합. 공백은 하이픈으로. 예: 법인세-절감-전략"},
                     "title":            {"type": "string", "description": "블로그 포스트 제목. 60자 이내, 핵심 키워드 앞쪽 배치."},
                     "meta_title":       {"type": "string", "description": "Rank Math SEO 스니펫 타이틀. 550~580px 범위로 작성. 한글 약 50~53자 기준. title과 다르게 SEO에 최적화된 형태로 작성."},
                     "meta_description": {"type": "string", "description": "Rank Math SEO 스니펫 설명. 850~920px 범위로 작성. 한글 약 77~84자 기준."},
