@@ -1,6 +1,7 @@
 """
 app.py — 법인 컨설팅 콘텐츠 파이프라인 메인 앱
 """
+import copy
 import hashlib
 import json
 import os
@@ -960,7 +961,8 @@ with tab3:
                                       f'blog_content_{video_id}', f'blog_category_{video_id}',
                                       f'blog_tags_{video_id}', f'blog_notes_{video_id}']:
                                 st.session_state.pop(k, None)
-                            st.success("보완 완료! 새 내용이 반영되었습니다.")
+                            _diff = st.session_state.pop(f'_refine_diff_{video_id}', '')
+                            st.success(f"✅ 보완 완료! 새 내용이 반영되었습니다.\n\n{_diff}" if _diff else "보완 완료!")
                         blog = content.get('blog', {})
                         blog_slug = st.text_input("퍼머링크", value=blog.get('slug', ''), key=f"blog_slug_{video_id}")
                         blog_title = st.text_input("블로그 제목", value=blog.get('title', ''), key=f"blog_title_{video_id}")
@@ -1046,22 +1048,29 @@ with tab3:
                         )
                         if st.button("🔄 보완 재작성", key=f"refine_blog_{video_id}", type="primary"):
                             if user_notes.strip():
-                                current_blog = {
-                                    'title': st.session_state.get(f"blog_title_{video_id}", blog_title),
-                                    'content': st.session_state.get(f"blog_content_{video_id}", blog_content),
-                                }
+                                # 기존 블로그 전체를 컨텍스트로 전달 (excerpt, FAQ, 카테고리 포함)
+                                current_blog = copy.deepcopy(blog)
+                                # 화면에서 사용자가 편집한 최신 값 반영
+                                current_blog['title'] = st.session_state.get(f"blog_title_{video_id}", blog_title)
+                                current_blog['content'] = st.session_state.get(f"blog_content_{video_id}", blog_content)
+                                _before_title = current_blog.get('title', '')
+                                _before_len = len(current_blog.get('content', ''))
                                 with st.spinner("블로그 보완 중... (약 20~30초)"):
                                     refined = refine_blog(current_blog, user_notes.strip())
                                 if 'error' in refined:
-                                    st.error(refined['error'])
+                                    st.error(f"보완 실패: {refined['error']}")
                                 else:
-                                    import copy
                                     content_copy = copy.deepcopy(content)
                                     content_copy['blog'].update(refined)
                                     db_save_content(video_id, video_title, channel_name, content_copy)
                                     st.session_state[f'content_{video_id}'] = content_copy
-                                    # 플래그 설정 → rerun 후 위젯 렌더링 전에 키 삭제
+                                    _after_title = refined.get('title', '')
+                                    _after_len = len(refined.get('content', ''))
                                     st.session_state[f'_refine_done_{video_id}'] = True
+                                    st.session_state[f'_refine_diff_{video_id}'] = (
+                                        f"제목: {_before_title} → {_after_title} | "
+                                        f"본문 길이: {_before_len:,}자 → {_after_len:,}자"
+                                    )
                                     st.rerun()
                             else:
                                 st.warning("보완 메모를 입력해주세요.")
