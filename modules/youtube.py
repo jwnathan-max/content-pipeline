@@ -107,7 +107,8 @@ def resolve_channel_from_url(url: str) -> dict | None:
         try:
             import yt_dlp
             with yt_dlp.YoutubeDL(_apply_ytdlp_cookies({'quiet': True, 'no_warnings': True,
-                                    'skip_download': True, 'playlist_items': '1'})) as ydl:
+                                    'skip_download': True, 'ignore_no_formats_error': True,
+                                    'playlist_items': '1'})) as ydl:
                 info = ydl.extract_info(url, download=False)
                 name = info.get('channel') or info.get('uploader') or channel_id
         except Exception:
@@ -128,7 +129,8 @@ def resolve_channel_from_url(url: str) -> dict | None:
 
     try:
         with yt_dlp.YoutubeDL(_apply_ytdlp_cookies({'quiet': True, 'no_warnings': True,
-                                'skip_download': True, 'playlist_items': '1'})) as ydl:
+                                'skip_download': True, 'ignore_no_formats_error': True,
+                                'playlist_items': '1'})) as ydl:
             info = ydl.extract_info(fetch_url, download=False)
             channel_id = info.get('channel_id') or info.get('uploader_id')
             channel_name = info.get('channel') or info.get('uploader') or channel_id
@@ -189,6 +191,7 @@ def fetch_recent_videos(channel_id: str, days: int = 7, fetch_limit: int = 15) -
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
+        'ignore_no_formats_error': True,
         'playlist_items': f'1-{fetch_limit}',
     })
 
@@ -494,6 +497,7 @@ def search_videos_by_keyword(keyword: str, max_results: int = 20) -> list[dict]:
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
+        'ignore_no_formats_error': True,
     })
 
     try:
