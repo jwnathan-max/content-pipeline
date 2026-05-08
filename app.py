@@ -731,32 +731,49 @@ with tab3:
     with st.expander("✍️ 직접 입력 모드 (유튜브 없이 작성)", expanded=False):
         st.caption("협력사 소개, 자체 기획 글 등 유튜브 영상이 없는 주제를 입력하면 동일한 블로그 생성 로직으로 작성됩니다.")
 
-        # ── URL에서 본문 자동 가져오기 ──
+        # ── URL에서 본문 자동 가져오기 (여러 페이지 일괄) ──
         st.markdown("**🔗 참고 URL에서 본문 가져오기 (선택)**")
-        url_col1, url_col2 = st.columns([4, 1])
-        with url_col1:
-            ref_url = st.text_input(
-                "참고 페이지 URL",
-                placeholder="https://www.bizpartners.co.kr/31",
-                key="manual_ref_url",
-                label_visibility="collapsed",
-            )
-        with url_col2:
-            fetch_clicked = st.button("📥 가져오기", key="fetch_ref_url", use_container_width=True)
-        if fetch_clicked and ref_url.strip():
-            with st.spinner("페이지 본문 추출 중..."):
-                fetched = fetch_url_content(ref_url.strip())
-            if 'error' in fetched:
-                st.error(fetched['error'])
+        st.caption("URL을 한 줄에 하나씩 입력하세요. 여러 페이지를 한 번에 합쳐서 본문에 채워줍니다.")
+        ref_urls_text = st.text_area(
+            "참고 페이지 URL 목록",
+            placeholder="https://www.bizpartners.co.kr/31\nhttps://www.bizpartners.co.kr/32\nhttps://www.bizpartners.co.kr/45",
+            height=110,
+            key="manual_ref_urls",
+            label_visibility="collapsed",
+        )
+        fetch_clicked = st.button("📥 전체 가져오기", key="fetch_ref_urls", use_container_width=False)
+        if fetch_clicked:
+            urls = [u.strip() for u in ref_urls_text.strip().splitlines() if u.strip()]
+            if not urls:
+                st.warning("URL을 한 줄에 하나씩 입력해주세요.")
             else:
-                st.session_state['manual_topic_title'] = fetched.get('title', '')
-                _body = fetched['text']
-                if ref_url.strip():
-                    _body = f"[참고 URL: {ref_url.strip()}]\n\n{_body}"
-                st.session_state['manual_topic_body'] = _body
-                st.success(f"✅ 본문 {len(fetched['text']):,}자 추출 완료. 아래에서 검토·수정 후 생성하세요.")
-                st.rerun()
-        st.caption("URL을 입력하고 가져오기를 누르면 제목·본문이 자동으로 채워집니다. (여러 페이지를 합치고 싶으면 가져온 뒤 본문에 추가로 붙여넣으세요.)")
+                progress = st.progress(0, text=f"0/{len(urls)} 가져오는 중...")
+                fetched_parts = []
+                first_title = ""
+                failed = []
+                for i, u in enumerate(urls):
+                    progress.progress(i / len(urls), text=f"{i+1}/{len(urls)} 가져오는 중... ({u[:60]})")
+                    res = fetch_url_content(u)
+                    if 'error' in res:
+                        failed.append(f"{u} — {res['error']}")
+                        continue
+                    if not first_title and res.get('title'):
+                        first_title = res['title']
+                    fetched_parts.append(f"[참고 {i+1}] {u}\n\n{res['text']}")
+                progress.progress(1.0, text="완료")
+                progress.empty()
+                if not fetched_parts:
+                    st.error("모든 URL에서 본문 추출에 실패했습니다.\n\n" + "\n".join(failed))
+                else:
+                    combined = "\n\n───────────────────────\n\n".join(fetched_parts)
+                    st.session_state['manual_topic_body'] = combined
+                    if first_title:
+                        st.session_state['manual_topic_title'] = first_title
+                    msg = f"✅ {len(fetched_parts)}개 페이지에서 총 {len(combined):,}자 추출 완료."
+                    if failed:
+                        msg += f" (⚠️ {len(failed)}개 실패: " + "; ".join(failed) + ")"
+                    st.success(msg)
+                    st.rerun()
 
         st.divider()
         manual_title = st.text_input("주제 / 가제목", placeholder="예) 비즈파트너즈 협력사 소개 — 가족법인 설립부터 절세까지", key="manual_topic_title")
