@@ -110,9 +110,11 @@ def init_db():
             channel_name TEXT,
             processed_at TIMESTAMP DEFAULT NOW(),
             status       TEXT DEFAULT 'completed',
-            content_json TEXT
+            content_json TEXT,
+            source_type  TEXT DEFAULT 'youtube'
         )
     """)
+    cur.execute("ALTER TABLE processed_videos ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'youtube'")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS video_cache (
             cache_key   TEXT NOT NULL PRIMARY KEY,
@@ -196,14 +198,14 @@ def db_is_processed(video_id: str) -> bool:
     return row is not None
 
 
-def db_save_content(video_id: str, title: str, channel_name: str, content: dict, status: str = "completed"):
+def db_save_content(video_id: str, title: str, channel_name: str, content: dict, status: str = "completed", source_type: str = "youtube"):
     conn = get_db()
     _execute(conn,
-        """INSERT INTO processed_videos (video_id, title, channel_name, status, content_json)
-           VALUES (%s, %s, %s, %s, %s)
+        """INSERT INTO processed_videos (video_id, title, channel_name, status, content_json, source_type)
+           VALUES (%s, %s, %s, %s, %s, %s)
            ON CONFLICT (video_id) DO UPDATE SET title=EXCLUDED.title, channel_name=EXCLUDED.channel_name,
-           status=EXCLUDED.status, content_json=EXCLUDED.content_json, processed_at=NOW()""",
-        (video_id, title, channel_name, status, json.dumps(content, ensure_ascii=False)),
+           status=EXCLUDED.status, content_json=EXCLUDED.content_json, source_type=EXCLUDED.source_type, processed_at=NOW()""",
+        (video_id, title, channel_name, status, json.dumps(content, ensure_ascii=False), source_type),
     )
     put_db(conn)
 
@@ -724,6 +726,39 @@ with tab3:
                 st.rerun()
         url_input = target['url']
 
+    # ── 직접 입력 모드 (유튜브 없이 자체 콘텐츠 작성) ──
+    with st.expander("✍️ 직접 입력 모드 (유튜브 없이 작성)", expanded=False):
+        st.caption("협력사 소개, 자체 기획 글 등 유튜브 영상이 없는 주제를 입력하면 동일한 블로그 생성 로직으로 작성됩니다.")
+        manual_title = st.text_input("주제 / 가제목", placeholder="예) 비즈파트너즈 협력사 소개 — 가족법인 설립부터 절세까지", key="manual_topic_title")
+        manual_body = st.text_area(
+            "핵심 내용 / 참고 자료 (자유 형식)",
+            placeholder="작성하고 싶은 내용을 자유롭게 적어주세요. 핵심 메시지, 강조 포인트, 사례, 참고 자료 등 풍부할수록 좋습니다.\n\n예) 비즈파트너즈는 법인 컨설팅 협력사로서 가족법인 설립, 명의신탁 리스크 점검, 정관 정비, 가지급금 정리 등을 전문으로 한다. 주요 차별점은...",
+            height=250,
+            key="manual_topic_body",
+        )
+        if st.button("✍️ 이 내용으로 블로그 생성 시작", key="start_manual", type="primary"):
+            if not manual_title.strip() or not manual_body.strip():
+                st.warning("주제와 핵심 내용을 모두 입력해주세요.")
+            else:
+                manual_id = "manual_" + hashlib.md5(manual_title.strip().encode()).hexdigest()[:10]
+                manual_target = {
+                    'video_id': manual_id,
+                    'title': manual_title.strip(),
+                    'channel_name': '직접 입력',
+                    'url': '',
+                    'source_type': 'manual',
+                }
+                st.session_state['target_video'] = manual_target
+                st.session_state['transcript_text'] = manual_body.strip()
+                st.session_state['transcript_source'] = '직접 입력'
+                st.session_state['auto_generate'] = True
+                st.session_state['gen_state'] = 'generating'  # Step 1 skip
+                for k in list(st.session_state.keys()):
+                    if k.startswith('content_'):
+                        del st.session_state[k]
+                db_set_cache('__last_target_video', manual_target)
+                st.rerun()
+
     # URL 직접 입력 — 항상 표시 (새 영상으로 즉시 전환 가능)
     new_url_label = "다른 YouTube URL로 새로 생성" if target else "YouTube URL 직접 입력"
     url_col1, url_col2 = st.columns([5, 1])
@@ -756,14 +791,26 @@ with tab3:
     if not target:
         url_input = manual_url
 
-    if url_input:
+    is_manual_source = bool(target and target.get('source_type') == 'manual')
+    _src_type = 'manual' if is_manual_source else 'youtube'
+
+    if is_manual_source:
+        video_id = target['video_id']
+        video_title = target['title']
+        channel_name = target.get('channel_name', '직접 입력')
+        already_done = db_is_processed(video_id)
+        url_input = video_id  # truthy로 만들어 아래 블록 진입
+    elif url_input:
         video_id = extract_video_id(url_input)
         if not video_id:
             st.error("유효한 YouTube URL이 아닙니다.")
+            url_input = ""
         else:
             video_title = target['title'] if target else url_input
             channel_name = target.get('channel_name', '') if target else ''
             already_done = db_is_processed(video_id)
+
+    if url_input and (is_manual_source or extract_video_id(url_input)):
 
             # DB에서 콘텐츠 자동 복원 (새로고침 후에도 에디터 유지)
             if f'content_{video_id}' not in st.session_state and already_done:
@@ -888,7 +935,7 @@ with tab3:
                         st.session_state['gen_state'] = 'idle'
                         st.session_state['auto_generate'] = False
                     else:
-                        db_save_content(video_id, video_title, channel_name, content)
+                        db_save_content(video_id, video_title, channel_name, content, source_type=_src_type)
                         st.session_state[f'content_{video_id}'] = content
                         st.session_state['auto_generate'] = False
                         st.session_state['gen_state'] = 'done'
@@ -1034,7 +1081,7 @@ with tab3:
                             content['blog']['content'] = blog_content
                             content['blog']['category'] = blog_category
                             content['blog']['tags'] = [t.strip() for t in blog_tags_str.split(",") if t.strip()]
-                            db_save_content(video_id, video_title, channel_name, content)
+                            db_save_content(video_id, video_title, channel_name, content, source_type=_src_type)
                             st.success("저장 완료!")
 
                         st.divider()
@@ -1062,7 +1109,7 @@ with tab3:
                                 else:
                                     content_copy = copy.deepcopy(content)
                                     content_copy['blog'].update(refined)
-                                    db_save_content(video_id, video_title, channel_name, content_copy)
+                                    db_save_content(video_id, video_title, channel_name, content_copy, source_type=_src_type)
                                     st.session_state[f'content_{video_id}'] = content_copy
                                     _after_title = refined.get('title', '')
                                     _after_len = len(refined.get('content', ''))
@@ -1138,7 +1185,7 @@ with tab3:
                             }
                             sms_result = extract_sms_from_blog(blog_data_for_sms)
                             content['sms'] = sms_result
-                            db_save_content(video_id, video_title, channel_name, content)
+                            db_save_content(video_id, video_title, channel_name, content, source_type=_src_type)
                             st.session_state[f'content_{video_id}'] = content
                             st.rerun()
                     with col_sms2:
@@ -1153,7 +1200,7 @@ with tab3:
                                 st.error(sms_result['error'])
                             else:
                                 content['sms'] = sms_result
-                                db_save_content(video_id, video_title, channel_name, content)
+                                db_save_content(video_id, video_title, channel_name, content, source_type=_src_type)
                                 st.session_state[f'content_{video_id}'] = content
                                 st.rerun()
 
@@ -1175,7 +1222,7 @@ with tab3:
                                 content['sms']['title'] = sms_title
                                 content['sms']['body'] = sms_body
                                 content['sms']['byte_count'] = byte_count
-                                db_save_content(video_id, video_title, channel_name, content)
+                                db_save_content(video_id, video_title, channel_name, content, source_type=_src_type)
                                 st.success("저장 완료!")
                         with col_regen_sms:
                             if st.button("🔄 문자 재생성 (AI)", key=f"regen_sms_{video_id}"):
@@ -1189,7 +1236,7 @@ with tab3:
                                     st.error(sms_result['error'])
                                 else:
                                     content['sms'] = sms_result
-                                    db_save_content(video_id, video_title, channel_name, content)
+                                    db_save_content(video_id, video_title, channel_name, content, source_type=_src_type)
                                     st.session_state[f'content_{video_id}'] = content
                                     for k in [f'sms_title_{video_id}', f'sms_body_{video_id}']:
                                         st.session_state.pop(k, None)
@@ -1307,7 +1354,7 @@ with tab4:
 
     conn = get_db()
     rows = _fetchall(conn,
-        "SELECT video_id, title, channel_name, processed_at, status FROM processed_videos ORDER BY processed_at DESC LIMIT 50"
+        "SELECT video_id, title, channel_name, processed_at, status, COALESCE(source_type, 'youtube') AS source_type FROM processed_videos ORDER BY processed_at DESC LIMIT 50"
     )
     put_db(conn)
 
@@ -1319,17 +1366,22 @@ with tab4:
             status_icon = "✅" if row['status'] == 'completed' else "❌"
             col1, col2 = st.columns([6, 1])
             with col1:
-                st.markdown(f"{status_icon} **{row['title'] or row['video_id']}**")
+                _is_manual = row.get('source_type') == 'manual'
+                _src_badge = "✍️ 직접입력" if _is_manual else "▶️ YouTube"
+                st.markdown(f"{status_icon} {_src_badge} **{row['title'] or row['video_id']}**")
                 _pa = str(row['processed_at'] or '')[:16] or '알 수 없음'
-                st.caption(f"{row['channel_name']} | {_pa} | https://www.youtube.com/watch?v={row['video_id']}")
+                _link = "직접 입력 콘텐츠" if _is_manual else f"https://www.youtube.com/watch?v={row['video_id']}"
+                st.caption(f"{row['channel_name']} | {_pa} | {_link}")
             with col2:
                 if st.button("열기", key=f"open_{row['video_id']}"):
                     vid = row['video_id']
+                    _is_manual_open = row.get('source_type') == 'manual'
                     video = {
                         'video_id': vid,
                         'title': row['title'] or vid,
                         'channel_name': row['channel_name'] or '',
-                        'url': f"https://www.youtube.com/watch?v={vid}",
+                        'url': '' if _is_manual_open else f"https://www.youtube.com/watch?v={vid}",
+                        'source_type': 'manual' if _is_manual_open else 'youtube',
                     }
                     st.session_state['target_video'] = video
                     st.session_state['auto_generate'] = False
