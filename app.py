@@ -28,6 +28,7 @@ from modules.youtube import (
 from modules.ai_processor import generate_content, refine_blog, extract_sms_from_blog, generate_sms_from_blog
 from modules.image_generator import generate_card_image
 from modules.wordpress_publisher import publish_post, upload_image, test_connection, fetch_published_posts, estimate_pixel_width
+from modules.url_fetcher import fetch_url_content
 
 load_dotenv()
 
@@ -729,6 +730,35 @@ with tab3:
     # ── 직접 입력 모드 (유튜브 없이 자체 콘텐츠 작성) ──
     with st.expander("✍️ 직접 입력 모드 (유튜브 없이 작성)", expanded=False):
         st.caption("협력사 소개, 자체 기획 글 등 유튜브 영상이 없는 주제를 입력하면 동일한 블로그 생성 로직으로 작성됩니다.")
+
+        # ── URL에서 본문 자동 가져오기 ──
+        st.markdown("**🔗 참고 URL에서 본문 가져오기 (선택)**")
+        url_col1, url_col2 = st.columns([4, 1])
+        with url_col1:
+            ref_url = st.text_input(
+                "참고 페이지 URL",
+                placeholder="https://www.bizpartners.co.kr/31",
+                key="manual_ref_url",
+                label_visibility="collapsed",
+            )
+        with url_col2:
+            fetch_clicked = st.button("📥 가져오기", key="fetch_ref_url", use_container_width=True)
+        if fetch_clicked and ref_url.strip():
+            with st.spinner("페이지 본문 추출 중..."):
+                fetched = fetch_url_content(ref_url.strip())
+            if 'error' in fetched:
+                st.error(fetched['error'])
+            else:
+                st.session_state['manual_topic_title'] = fetched.get('title', '')
+                _body = fetched['text']
+                if ref_url.strip():
+                    _body = f"[참고 URL: {ref_url.strip()}]\n\n{_body}"
+                st.session_state['manual_topic_body'] = _body
+                st.success(f"✅ 본문 {len(fetched['text']):,}자 추출 완료. 아래에서 검토·수정 후 생성하세요.")
+                st.rerun()
+        st.caption("URL을 입력하고 가져오기를 누르면 제목·본문이 자동으로 채워집니다. (여러 페이지를 합치고 싶으면 가져온 뒤 본문에 추가로 붙여넣으세요.)")
+
+        st.divider()
         manual_title = st.text_input("주제 / 가제목", placeholder="예) 비즈파트너즈 협력사 소개 — 가족법인 설립부터 절세까지", key="manual_topic_title")
         manual_body = st.text_area(
             "핵심 내용 / 참고 자료 (자유 형식)",
